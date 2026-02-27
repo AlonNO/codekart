@@ -10,6 +10,7 @@ function Lobby() {
   const location = useLocation();
   const navigate = useNavigate();
   const username = location.state?.username || 'Anonymous';
+const loadout = location.state?.loadout || ['blur', 'shake', 'reverse_typing'];
 
   const [status, setStatus] = useState('connecting');
   const [queuePosition, setQueuePosition] = useState(null);
@@ -31,7 +32,7 @@ function Lobby() {
     newSocket.on('connect', () => {
       console.log('🔌 Connected as:', newSocket.id);
       setStatus('waiting');
-      newSocket.emit('join_queue', { username });
+      newSocket.emit('join_queue', { username, loadout });
     });
 
     newSocket.on('queue_joined', (data) => {

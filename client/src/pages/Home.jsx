@@ -2,11 +2,12 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
+import LoadoutEditor from '../components/LoadoutEditor';
 
 function Home() {
   const [guestUsername, setGuestUsername] = useState('');
   const navigate = useNavigate();
-  const { user, profile, signOut, loading } = useAuth();
+  const { user, profile, signOut, loading, refreshProfile } = useAuth();
 
   // Pre-compute random values so they're stable across renders
   const particles = useMemo(() => {
@@ -19,17 +20,19 @@ function Home() {
     }));
   }, []);
 
-  const handlePlay = () => {
+const handlePlay = () => {
     const name = user && profile ? profile.username : guestUsername.trim();
     if (!name || name.length < 2) {
       alert('Enter a username (at least 2 characters)');
       return;
     }
+    const loadout = profile?.loadout || ['blur', 'shake', 'reverse_typing'];
     navigate('/lobby', {
       state: {
         username: name,
         userId: user?.id || null,
-        isGuest: !user
+        isGuest: !user,
+        loadout
       }
     });
   };
@@ -228,7 +231,17 @@ function Home() {
           </p>
         )}
       </motion.div>
-
+      {/* Loadout Editor - only for logged in users */}
+      {user && profile && (
+        <motion.div
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.8 }}
+          className="z-10"
+        >
+          <LoadoutEditor profile={profile} onUpdate={refreshProfile} />
+        </motion.div>
+      )}
       {/* Footer */}
       <p className="text-gray-600 text-sm mt-8 z-10">
         Real-time multiplayer competitive coding

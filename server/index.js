@@ -648,9 +648,10 @@ io.on('connection', (socket) => {
   console.log(`⚡ Player connected: ${socket.id}`);
 
   // === MATCHMAKING ===
+  // === MATCHMAKING ===
   socket.on('join_queue', (data) => {
     const username = data.username || `Player_${socket.id.slice(0, 4)}`;
-
+    const loadout = data.loadout || ['blur', 'shake', 'reverse_typing'];
     // 1. Session Management
     const existingSession = activeSessions.get(username);
     
@@ -665,7 +666,8 @@ io.on('connection', (socket) => {
       console.log(`🔄 ${username} replaced old queue session`);
     }
 
-    const player = { id: socket.id, username };
+      const player = { id: socket.id, username, loadout };
+
     
     // Prevent physical duplicate socket objects in queue
     if (waitingQueue.some(p => p.id === socket.id)) return;
@@ -875,7 +877,9 @@ io.on('connection', (socket) => {
     if (now - player.lastItemBox < ITEM_BOX_COOLDOWN) return;
 
     player.lastItemBox = now;
-    const powerup = getRandomPowerup();
+    
+    // Pick a random powerup strictly from the player's equipped loadout
+    const powerup = player.loadout[Math.floor(Math.random() * player.loadout.length)];
     player.powerups.push(powerup);
 
     socket.emit('powerup_earned', { powerup });
