@@ -6,6 +6,7 @@ import Lobby from './pages/Lobby';
 import Arena from './pages/Arena';
 import Leaderboard from './pages/Leaderboard';
 import Shop from './pages/Shop';
+import CustomLobby from './pages/CustomLobby';
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
           <Route path="/arena" element={<Arena />} />
           <Route path="/leaderboard" element={<Leaderboard />} />
         <Route path="/shop" element={<Shop />} />
+        <Route path="/custom-lobby" element={<CustomLobby />} />
 
         </Routes>
       </BrowserRouter>

@@ -522,6 +522,16 @@ const waitingQueue = [];
 const activeRooms = new Map();
 const playerRooms = new Map();        // socketId -> roomId
 const activeSessions = new Map();     // username -> { socketId, state: 'queue' | 'game', roomId }
+const customLobbies = new Map();      // lobbyCode -> { host, guest, hostReady, problemId }
+
+function generateLobbyCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  // Make sure it's unique
+  if (customLobbies.has(code)) return generateLobbyCode();
+  return code;
+}
 
 function kickOldSession(username, reason) {
   const oldSession = activeSessions.get(username);
@@ -724,12 +734,6 @@ io.on('connection', (socket) => {
         startTime: Date.now()
       });
 
-      playerRooms.set(player2.id, roomId);
-      playerRooms.set(player1.id, roomId);
-
-      // Update sessions to Game state
-      activeSessions.set(player1.username, { socketId: player1.id, state: 'game', roomId });
-      activeSessions.set(player2.username, { socketId: player2.id, state: 'game', roomId });
 
       const s1 = io.sockets.sockets.get(player2.id);
       const s2 = io.sockets.sockets.get(player1.id);
@@ -917,6 +921,111 @@ io.on('connection', (socket) => {
     socket.emit('powerups_updated', { powerups: player.powerups });
   });
 
+    // === CUSTOM LOBBY: CREATE ===
+  socket.on('create_lobby', (data) => {
+    const username = data.username || `Player_${socket.id.slice(0, 4)}`;
+    const loadout = data.loadout || ['blur', 'shake', 'reverse_typing'];
+    const equipped_border = data.equipped_border || 'default';
+
+    const code = generateLobbyCode();
+
+    customLobbies.set(code, {
+      host: { id: socket.id, username, loadout, equipped_border },
+      guest: null,
+      createdAt: Date.now()
+    });
+
+    socket.join(`lobby_${code}`);
+    socket.emit('lobby_created', { code });
+    console.log(`🏠 Lobby ${code} created by ${username}`);
+  });
+
+  // === CUSTOM LOBBY: JOIN ===
+  socket.on('join_lobby', (data) => {
+    const code = (data.code || '').toUpperCase().trim();
+    const username = data.username || `Player_${socket.id.slice(0, 4)}`;
+    const loadout = data.loadout || ['blur', 'shake', 'reverse_typing'];
+    const equipped_border = data.equipped_border || 'default';
+
+    const lobby = customLobbies.get(code);
+
+    if (!lobby) {
+      socket.emit('lobby_error', { message: 'Lobby not found. Check your code.' });
+      return;
+    }
+
+    if (lobby.guest) {
+      socket.emit('lobby_error', { message: 'Lobby is already full.' });
+      return;
+    }
+
+    if (lobby.host.username === username) {
+      socket.emit('lobby_error', { message: 'You cannot join your own lobby.' });
+      return;
+    }
+
+    lobby.guest = { id: socket.id, username, loadout, equipped_border };
+    socket.join(`lobby_${code}`);
+
+    console.log(`🏠 ${username} joined lobby ${code}`);
+
+    // Start the game immediately
+    const roomId = `room_${Date.now()}`;
+    const problemId = PROBLEM_IDS[Math.floor(Math.random() * PROBLEM_IDS.length)];
+    const problem = PROBLEMS[problemId];
+
+    const player1 = lobby.host;
+    const player2 = lobby.guest;
+
+    activeRooms.set(roomId, {
+      players: [
+        { ...player1, hearts: MAX_HEARTS, powerups: [], finished: false, eliminated: false, lastItemBox: 0 },
+        { ...player2, hearts: MAX_HEARTS, powerups: [], finished: false, eliminated: false, lastItemBox: 0 }
+      ],
+      problemId,
+      startTime: Date.now()
+    });
+
+    playerRooms.set(player1.id, roomId);
+    playerRooms.set(player2.id, roomId);
+    activeSessions.set(player1.username, { socketId: player1.id, state: 'game', roomId });
+    activeSessions.set(player2.username, { socketId: player2.id, state: 'game', roomId });
+
+    const s1 = io.sockets.sockets.get(player1.id);
+    const s2 = io.sockets.sockets.get(player2.id);
+    if (s1) s1.join(roomId);
+    if (s2) s2.join(roomId);
+
+    io.to(`lobby_${code}`).emit('game_start', {
+      roomId,
+      players: [
+        { id: player1.id, username: player1.username, equipped_border: player1.equipped_border },
+        { id: player2.id, username: player2.username, equipped_border: player2.equipped_border }
+      ],
+      problem: {
+        id: problem.id, title: problem.title, description: problem.description,
+        examples: problem.displayExamples, starterCode: problem.starterCode,
+        totalHiddenTests: HIDDEN_TEST_COUNT, maxHearts: MAX_HEARTS
+      }
+    });
+
+    customLobbies.delete(code);
+    console.log(`🏁 Lobby ${code} -> Match! ${roomId} | ${player1.username} vs ${player2.username} | ${problem.title}`);
+  });
+
+  // === CUSTOM LOBBY: LEAVE ===
+  socket.on('leave_lobby', (data) => {
+    const code = (data.code || '').toUpperCase().trim();
+    const lobby = customLobbies.get(code);
+    if (!lobby) return;
+
+    if (lobby.host.id === socket.id) {
+      // Host left, destroy lobby
+      customLobbies.delete(code);
+      io.to(`lobby_${code}`).emit('lobby_closed', { reason: 'Host left the lobby' });
+      console.log(`🏠 Lobby ${code} destroyed (host left)`);
+    }
+  });
   // === DISCONNECT ===
   socket.on('disconnect', () => {
     console.log(`❌ Disconnected: ${socket.id}`);
@@ -931,7 +1040,14 @@ io.on('connection', (socket) => {
 
     const queueIndex = waitingQueue.findIndex(p => p.id === socket.id);
     if (queueIndex !== -1) waitingQueue.splice(queueIndex, 1);
-
+    // Clean up custom lobbies
+    for (const [code, lobby] of customLobbies.entries()) {
+      if (lobby.host.id === socket.id) {
+        customLobbies.delete(code);
+        io.to(`lobby_${code}`).emit('lobby_closed', { reason: 'Host disconnected' });
+        console.log(`🏠 Lobby ${code} destroyed (host disconnected)`);
+      }
+    }
     const roomId = playerRooms.get(socket.id);
     if (roomId) {
       const room = activeRooms.get(roomId);

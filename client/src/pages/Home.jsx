@@ -221,6 +221,41 @@ const handlePlay = () => {
           🏁 PLAY
         </motion.button>
 
+        <div className="flex gap-3 w-80">
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              const name = user && profile ? profile.username : guestUsername.trim();
+              if (!name || name.length < 2) { alert('Enter a username first'); return; }
+              const loadout = profile?.loadout || ['blur', 'shake', 'reverse_typing'];
+              navigate('/custom-lobby', {
+                state: { username: name, loadout, equipped_border: profile?.equipped_border || 'default', mode: 'create' }
+              });
+            }}
+            className="flex-1 px-4 py-3 rounded-xl bg-green-500 text-black
+                       font-bold cursor-pointer hover:bg-green-400 transition-colors text-sm"
+          >
+            🏠 Create Room
+          </motion.button>
+
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              const name = user && profile ? profile.username : guestUsername.trim();
+              if (!name || name.length < 2) { alert('Enter a username first'); return; }
+              const loadout = profile?.loadout || ['blur', 'shake', 'reverse_typing'];
+              navigate('/custom-lobby', {
+                state: { username: name, loadout, equipped_border: profile?.equipped_border || 'default', mode: 'join' }
+              });
+            }}
+            className="flex-1 px-4 py-3 rounded-xl bg-blue-500 text-white
+                       font-bold cursor-pointer hover:bg-blue-400 transition-colors text-sm"
+          >
+            🔗 Join Room
+          </motion.button>
+        </div>
         {!user && (
           <p className="text-gray-600 text-xs">
             <span className="cursor-pointer hover:text-yellow-400 transition-colors"
