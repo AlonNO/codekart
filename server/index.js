@@ -10,7 +10,6 @@ const supabaseUrl = process.env.SUPABASE_URL || 'https://jacgotvppetopxcrldgb.su
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY || '';
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
-
 const app = express();
 const server = http.createServer(app);
 
@@ -29,11 +28,131 @@ app.get('/ping', (req, res) => {
 });
 
 // ============================================
-// CONSTANTS
+// SHOP API (secure: uses service role key)
+// ============================================
+
+async function getUserFromAuthHeader(req) {
+  const auth = req.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (!token) return { user: null, error: 'Missing Authorization Bearer token' };
+  if (!supabase) return { user: null, error: 'Supabase not configured on server' };
+
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data?.user) return { user: null, error: 'Invalid token' };
+  return { user: data.user, error: null };
+}
+
+app.post('/api/store/buy', async (req, res) => {
+  try {
+    const { user, error } = await getUserFromAuthHeader(req);
+    if (error) return res.status(401).json({ error });
+
+    const { itemKey } = req.body || {};
+    if (!itemKey) return res.status(400).json({ error: 'Missing itemKey' });
+
+    // Load item
+    const { data: item, error: itemErr } = await supabase
+      .from('store_items')
+      .select('*')
+      .eq('key', itemKey)
+      .maybeSingle();
+
+    if (itemErr || !item) return res.status(404).json({ error: 'Item not found' });
+
+    // Load profile
+    const { data: profile, error: profErr } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (profErr || !profile) return res.status(404).json({ error: 'Profile not found' });
+
+    // Already owned?
+    const { data: owned } = await supabase
+      .from('inventory')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('item_key', itemKey)
+      .maybeSingle();
+
+    if (owned) return res.json({ ok: true, message: 'Already owned' });
+
+    if (profile.kart_coins < item.price) {
+      return res.status(400).json({ error: 'Not enough Kart Coins' });
+    }
+
+    // Insert inventory + deduct coins
+    await supabase.from('inventory').insert({ user_id: user.id, item_key: itemKey });
+    await supabase.from('profiles').update({
+      kart_coins: profile.kart_coins - item.price,
+      updated_at: new Date().toISOString()
+    }).eq('id', user.id);
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/store/equip', async (req, res) => {
+  try {
+    const { user, error } = await getUserFromAuthHeader(req);
+    if (error) return res.status(401).json({ error });
+
+    const { itemKey } = req.body || {};
+    if (!itemKey) return res.status(400).json({ error: 'Missing itemKey' });
+
+    const { data: item } = await supabase
+      .from('store_items')
+      .select('*')
+      .eq('key', itemKey)
+      .maybeSingle();
+
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+
+    // Must own unless free
+    if (item.price > 0) {
+      const { data: inv } = await supabase
+        .from('inventory')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('item_key', itemKey)
+        .maybeSingle();
+
+      if (!inv) return res.status(403).json({ error: 'You do not own this item' });
+    }
+
+if (item.type === 'theme') {
+  const themeValue = item.meta?.themeKey || item.meta?.themeId || 'vs-dark';
+  await supabase.from('profiles').update({
+    equipped_theme: themeValue,
+    updated_at: new Date().toISOString()
+  }).eq('id', user.id);
+}
+
+    if (item.type === 'particles') {
+      const particleId = item.meta?.particleId || 'none';
+      await supabase.from('profiles').update({
+        equipped_particles: particleId,
+        updated_at: new Date().toISOString()
+      }).eq('id', user.id);
+    }
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ============================================
+// CONSTANTS & POWERUPS
 // ============================================
 const HIDDEN_TEST_COUNT = 20;
 const MAX_HEARTS = 3;
-const ITEM_BOX_COOLDOWN = 15000; // 15 seconds minimum between claims
+const ITEM_BOX_COOLDOWN = 15000;
 
 const POWERUP_TYPES = [
   'blur', 'shake', 'light_theme', 'reverse_typing', 'tiny_font',
@@ -85,9 +204,7 @@ const PROBLEMS = {
       for (let t = 0; t < count; t++) {
         const len = 4 + Math.floor(Math.random() * 12);
         const nums = [];
-        for (let j = 0; j < len; j++) {
-          nums.push(200 + j * 17 + Math.floor(Math.random() * 10));
-        }
+        for (let j = 0; j < len; j++) nums.push(200 + j * 17 + Math.floor(Math.random() * 10));
         const idx1 = Math.floor(Math.random() * len);
         let idx2 = Math.floor(Math.random() * (len - 1));
         if (idx2 >= idx1) idx2++;
@@ -99,7 +216,6 @@ const PROBLEMS = {
       return tests;
     }
   },
-
   reverseString: {
     id: 'reverseString',
     title: 'Reverse String',
@@ -130,7 +246,6 @@ const PROBLEMS = {
       return tests;
     }
   },
-
   fizzBuzz: {
     id: 'fizzBuzz',
     title: 'FizzBuzz',
@@ -170,7 +285,6 @@ const PROBLEMS = {
       return tests;
     }
   },
-
   isPalindrome: {
     id: 'isPalindrome',
     title: 'Valid Palindrome',
@@ -211,7 +325,6 @@ const PROBLEMS = {
       return tests;
     }
   },
-
   maxProfit: {
     id: 'maxProfit',
     title: 'Best Time to Buy & Sell Stock',
@@ -248,7 +361,6 @@ const PROBLEMS = {
       return tests;
     }
   },
-
   countVowels: {
     id: 'countVowels',
     title: 'Count the Vowels',
@@ -283,7 +395,6 @@ const PROBLEMS = {
       return tests;
     }
   },
-
   findMax: {
     id: 'findMax',
     title: 'Find the Maximum',
@@ -353,11 +464,9 @@ ${userCode}
     let userResult;
     try { userResult = JSON.parse(output); } catch { userResult = output; }
 
-    // Compute expected answer using solve
     const parsedArgs = test.input.map(a => { try { return JSON.parse(a); } catch { return a; } });
     const expected = problem.solve(...parsedArgs);
 
-    // Check if passed
     let passed;
     if (problem.validate) {
       passed = problem.validate(test.input, userResult);
@@ -392,23 +501,37 @@ function executeTests(userCode, tests, problem) {
     result.testIndex = i;
     results.push(result);
     if (!result.passed) failCount++;
-    // Stop early after 3 failures to save time
     if (failCount >= 3) break;
   }
-
   return results;
 }
 
 // ============================================
-// GAME STATE
+// GAME STATE & SESSION MANAGEMENT
 // ============================================
 const waitingQueue = [];
 const activeRooms = new Map();
-const playerRooms = new Map();
+const playerRooms = new Map();        // socketId -> roomId
+const activeSessions = new Map();     // username -> { socketId, state: 'queue' | 'game', roomId }
 
-// ============================================
-// SOCKET.IO CONNECTION
-// ============================================
+function kickOldSession(username, reason) {
+  const oldSession = activeSessions.get(username);
+  if (!oldSession) return;
+
+  const oldSocket = io.sockets.sockets.get(oldSession.socketId);
+  if (oldSocket) {
+    oldSocket.emit('session_kicked', { reason });
+    oldSocket.disconnect(true);
+  }
+
+  // Remove from queue if they were in it
+  const queueIndex = waitingQueue.findIndex(p => p.username === username);
+  if (queueIndex !== -1) waitingQueue.splice(queueIndex, 1);
+
+  playerRooms.delete(oldSession.socketId);
+  activeSessions.delete(username);
+}
+
 // ============================================
 // ELO & MATCH RECORDING
 // ============================================
@@ -423,22 +546,18 @@ function calculateElo(winnerElo, loserElo) {
 
 async function recordMatch(roomId, room, winnerPlayer, problem) {
   if (!supabase) return;
-
   const loserPlayer = room.players.find(p => p.username !== winnerPlayer.username);
   if (!loserPlayer) return;
 
   try {
-    const { data: winnerProfile } = await supabase
-      .from('profiles').select('*').eq('username', winnerPlayer.username).maybeSingle();
-    const { data: loserProfile } = await supabase
-      .from('profiles').select('*').eq('username', loserPlayer.username).maybeSingle();
+    const { data: winnerProfile } = await supabase.from('profiles').select('*').eq('username', winnerPlayer.username).maybeSingle();
+    const { data: loserProfile } = await supabase.from('profiles').select('*').eq('username', loserPlayer.username).maybeSingle();
 
     const winnerElo = winnerProfile?.elo || 1000;
     const loserElo = loserProfile?.elo || 1000;
     const { winnerChange, loserChange } = calculateElo(winnerElo, loserElo);
     const duration = Math.round((Date.now() - room.startTime) / 1000);
 
-    // Update winner if they have an account
     if (winnerProfile) {
       await supabase.from('profiles').update({
         elo: winnerProfile.elo + winnerChange,
@@ -450,7 +569,6 @@ async function recordMatch(roomId, room, winnerPlayer, problem) {
       console.log(`📊 ${winnerPlayer.username}: +${winnerChange} ELO, +50 coins`);
     }
 
-    // Update loser if they have an account
     if (loserProfile) {
       await supabase.from('profiles').update({
         elo: Math.max(0, loserProfile.elo + loserChange),
@@ -462,20 +580,12 @@ async function recordMatch(roomId, room, winnerPlayer, problem) {
       console.log(`📊 ${loserPlayer.username}: ${loserChange} ELO, +10 coins`);
     }
 
-    // Record match if at least one player has an account
     if (winnerProfile || loserProfile) {
       await supabase.from('matches').insert({
-        room_id: roomId,
-        winner_id: winnerProfile?.id || null,
-        loser_id: loserProfile?.id || null,
-        winner_username: winnerPlayer.username,
-        loser_username: loserPlayer.username,
-        problem_id: room.problemId,
-        problem_title: problem.title,
-        win_reason: 'solved',
-        duration_seconds: duration,
-        winner_elo_change: winnerProfile ? winnerChange : 0,
-        loser_elo_change: loserProfile ? loserChange : 0
+        room_id: roomId, winner_id: winnerProfile?.id || null, loser_id: loserProfile?.id || null,
+        winner_username: winnerPlayer.username, loser_username: loserPlayer.username,
+        problem_id: room.problemId, problem_title: problem.title, win_reason: 'solved',
+        duration_seconds: duration, winner_elo_change: winnerProfile ? winnerChange : 0, loser_elo_change: loserProfile ? loserChange : 0
       });
     }
   } catch (err) {
@@ -487,10 +597,8 @@ async function recordMatchElimination(roomId, room, winnerPlayer, loserPlayer, p
   if (!supabase) return;
 
   try {
-    const { data: winnerProfile } = await supabase
-      .from('profiles').select('*').eq('username', winnerPlayer.username).maybeSingle();
-    const { data: loserProfile } = await supabase
-      .from('profiles').select('*').eq('username', loserPlayer.username).maybeSingle();
+    const { data: winnerProfile } = await supabase.from('profiles').select('*').eq('username', winnerPlayer.username).maybeSingle();
+    const { data: loserProfile } = await supabase.from('profiles').select('*').eq('username', loserPlayer.username).maybeSingle();
 
     const winnerElo = winnerProfile?.elo || 1000;
     const loserElo = loserProfile?.elo || 1000;
@@ -522,82 +630,114 @@ async function recordMatchElimination(roomId, room, winnerPlayer, loserPlayer, p
 
     if (winnerProfile || loserProfile) {
       await supabase.from('matches').insert({
-        room_id: roomId,
-        winner_id: winnerProfile?.id || null,
-        loser_id: loserProfile?.id || null,
-        winner_username: winnerPlayer.username,
-        loser_username: loserPlayer.username,
-        problem_id: room.problemId,
-        problem_title: problem.title,
-        win_reason: 'opponent_eliminated',
-        duration_seconds: duration,
-        winner_elo_change: winnerProfile ? reducedWinnerChange : 0,
-        loser_elo_change: loserProfile ? loserChange : 0
+        room_id: roomId, winner_id: winnerProfile?.id || null, loser_id: loserProfile?.id || null,
+        winner_username: winnerPlayer.username, loser_username: loserPlayer.username,
+        problem_id: room.problemId, problem_title: problem.title, win_reason: 'opponent_eliminated',
+        duration_seconds: duration, winner_elo_change: winnerProfile ? reducedWinnerChange : 0, loser_elo_change: loserProfile ? loserChange : 0
       });
     }
   } catch (err) {
     console.error('Failed to record match:', err.message);
   }
 }
+
+// ============================================
+// SOCKET.IO CONNECTION
+// ============================================
 io.on('connection', (socket) => {
   console.log(`⚡ Player connected: ${socket.id}`);
 
   // === MATCHMAKING ===
   socket.on('join_queue', (data) => {
-    const alreadyInQueue = waitingQueue.some(p => p.id === socket.id);
-    if (alreadyInQueue) return;
+    const username = data.username || `Player_${socket.id.slice(0, 4)}`;
 
-    const player = {
-      id: socket.id,
-      username: data.username || `Player_${socket.id.slice(0, 4)}`
-    };
+    // 1. Session Management
+    const existingSession = activeSessions.get(username);
+    
+    if (existingSession && existingSession.state === 'game') {
+      socket.emit('queue_error', { message: 'You are already in a game in another tab.' });
+      console.log(`⚠️ ${username} tried to queue but is already in a game`);
+      return;
+    }
+
+    if (existingSession && existingSession.state === 'queue') {
+      kickOldSession(username, 'You joined the queue from another tab.');
+      console.log(`🔄 ${username} replaced old queue session`);
+    }
+
+    const player = { id: socket.id, username };
+    
+    // Prevent physical duplicate socket objects in queue
+    if (waitingQueue.some(p => p.id === socket.id)) return;
 
     waitingQueue.push(player);
-    console.log(`🎮 ${player.username} joined queue. Size: ${waitingQueue.length}`);
+    activeSessions.set(username, { socketId: socket.id, state: 'queue' });
+
+    console.log(`🎮 ${username} joined queue. Size: ${waitingQueue.length}`);
     socket.emit('queue_joined', { position: waitingQueue.length });
 
+    // 2. Try Matchmaking
     if (waitingQueue.length >= 2) {
-      const player1 = waitingQueue.shift();
-      const player2 = waitingQueue.shift();
+      let p1Index = -1;
+      let p2Index = -1;
+
+      // Find two completely different players
+      for (let i = 0; i < waitingQueue.length; i++) {
+        for (let j = i + 1; j < waitingQueue.length; j++) {
+          if (waitingQueue[i].username !== waitingQueue[j].username) {
+            p1Index = i;
+            p2Index = j;
+            break;
+          }
+        }
+        if (p1Index !== -1) break;
+      }
+
+      if (p1Index === -1 || p2Index === -1) return;
+
+      // Slice out the higher index first to not mess up the array shift
+      const player2 = waitingQueue.splice(p2Index, 1)[0];
+      const player1 = waitingQueue.splice(p1Index, 1)[0];
+
       const roomId = `room_${Date.now()}`;
       const problemId = PROBLEM_IDS[Math.floor(Math.random() * PROBLEM_IDS.length)];
       const problem = PROBLEMS[problemId];
 
       activeRooms.set(roomId, {
         players: [
-          { ...player1, hearts: MAX_HEARTS, powerups: [], finished: false, eliminated: false, lastItemBox: 0 },
-          { ...player2, hearts: MAX_HEARTS, powerups: [], finished: false, eliminated: false, lastItemBox: 0 }
+          { ...player2, hearts: MAX_HEARTS, powerups: [], finished: false, eliminated: false, lastItemBox: 0 },
+          { ...player1, hearts: MAX_HEARTS, powerups: [], finished: false, eliminated: false, lastItemBox: 0 }
         ],
         problemId,
         startTime: Date.now()
       });
 
-      playerRooms.set(player1.id, roomId);
       playerRooms.set(player2.id, roomId);
+      playerRooms.set(player1.id, roomId);
 
-      const s1 = io.sockets.sockets.get(player1.id);
-      const s2 = io.sockets.sockets.get(player2.id);
+      // Update sessions to Game state
+      activeSessions.set(player1.username, { socketId: player1.id, state: 'game', roomId });
+      activeSessions.set(player2.username, { socketId: player2.id, state: 'game', roomId });
+
+      const s1 = io.sockets.sockets.get(player2.id);
+      const s2 = io.sockets.sockets.get(player1.id);
       if (s1) s1.join(roomId);
       if (s2) s2.join(roomId);
 
       io.to(roomId).emit('game_start', {
         roomId,
         players: [
-          { id: player1.id, username: player1.username },
-          { id: player2.id, username: player2.username }
+          { id: player2.id, username: player2.username },
+          { id: player1.id, username: player1.username }
         ],
         problem: {
-          id: problem.id,
-          title: problem.title,
-          description: problem.description,
-          examples: problem.displayExamples,
-          starterCode: problem.starterCode,
-          totalHiddenTests: HIDDEN_TEST_COUNT,
-          maxHearts: MAX_HEARTS
+          id: problem.id, title: problem.title, description: problem.description,
+          examples: problem.displayExamples, starterCode: problem.starterCode,
+          totalHiddenTests: HIDDEN_TEST_COUNT, maxHearts: MAX_HEARTS
         }
       });
 
-      console.log(`🏁 Match! ${roomId} | ${player1.username} vs ${player2.username} | ${problem.title}`);
+      console.log(`🏁 Match! ${roomId} | ${player2.username} vs ${player1.username} | ${problem.title}`);
     }
   });
 
@@ -612,13 +752,15 @@ io.on('connection', (socket) => {
         playerRooms.delete(player.id);
         player.id = socket.id;
         playerRooms.set(socket.id, roomId);
+        
+        // Update session tracking with the new socket
+        activeSessions.set(username, { socketId: socket.id, state: 'game', roomId });
       }
     }
     console.log(`🔄 ${username} rejoined ${roomId}`);
   });
 
-  // === RUN CODE (Examples only, infinite uses) ===
-  // === RUN CODE (Custom tests, infinite uses) ===
+  // === RUN CODE ===
   socket.on('run_code', (data) => {
     const { roomId, code, customTests } = data;
     const room = activeRooms.get(roomId);
@@ -626,20 +768,14 @@ io.on('connection', (socket) => {
 
     const problem = PROBLEMS[room.problemId];
 
-    // Use custom tests if provided, otherwise use examples
     let testsToRun;
     if (customTests && customTests.length > 0) {
-      // Parse custom test inputs from strings
-      testsToRun = customTests.map(test => ({
-        input: test.input
-      }));
+      testsToRun = customTests.map(test => ({ input: test.input }));
     } else {
       testsToRun = problem.exampleTests;
     }
 
-    // Limit to 10 custom tests max
     testsToRun = testsToRun.slice(0, 10);
-
     const results = executeTests(code, testsToRun, problem);
 
     socket.emit('run_results', {
@@ -647,11 +783,9 @@ io.on('connection', (socket) => {
       passedCount: results.filter(r => r.passed).length,
       totalCount: results.length
     });
-
-    console.log(`▶ Run: ${results.filter(r => r.passed).length}/${results.length} passed`);
   });
 
-  // === SUBMIT CODE (Hidden tests, costs a heart) ===
+  // === SUBMIT CODE ===
   socket.on('submit_code', (data) => {
     const { roomId, code, username } = data;
     const room = activeRooms.get(roomId);
@@ -666,36 +800,26 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // FORCE_WIN cheat code for demos
     if (code.includes('// FORCE_WIN')) {
       player.finished = true;
-      socket.emit('submit_results', {
-        allPassed: true,
-        heartsLeft: player.hearts,
-        passedCount: HIDDEN_TEST_COUNT + problem.exampleTests.length,
-        totalCount: HIDDEN_TEST_COUNT + problem.exampleTests.length,
-        exampleResults: problem.exampleTests.map((t, i) => ({
-          testIndex: i, passed: true,
-          input: `${problem.functionName}(${t.input.join(', ')})`,
-          expected: 'OK', actual: 'OK'
-        })),
-        hiddenPassed: HIDDEN_TEST_COUNT,
-        hiddenTotal: HIDDEN_TEST_COUNT,
-        firstFailures: []
-      });
       room.gameEnded = true;
+      socket.emit('submit_results', {
+        allPassed: true, heartsLeft: player.hearts, passedCount: 23, totalCount: 23,
+        exampleResults: problem.exampleTests.map((t, i) => ({ testIndex: i, passed: true, input: `${problem.functionName}()`, expected: 'OK', actual: 'OK' })),
+        hiddenPassed: 20, hiddenTotal: 20, firstFailures: []
+      });
       io.to(roomId).emit('game_over', { winner: username, reason: 'solved' });
       console.log(`🏆 ${username} WINS (cheat code)!`);
-      // Record match in database
+      
+      // Clean up sessions
+      room.players.forEach(p => activeSessions.delete(p.username));
       recordMatch(roomId, room, player, problem);
       return;
     }
 
-    // Run examples first
     const exampleResults = executeTests(code, problem.exampleTests, problem);
     const examplesPassed = exampleResults.filter(r => r.passed).length;
 
-    // Generate fresh hidden tests
     const hiddenTests = problem.generateHiddenTests(HIDDEN_TEST_COUNT);
     const hiddenResults = executeTests(code, hiddenTests, problem);
     const hiddenPassed = hiddenResults.filter(r => r.passed).length;
@@ -706,30 +830,18 @@ io.on('connection', (socket) => {
 
     if (!allPassed) {
       player.hearts -= 1;
-      console.log(`💔 ${username} failed submit. Hearts: ${player.hearts}`);
     }
 
-    // Get first 2 hidden failures for display
     const firstFailures = hiddenResults.filter(r => !r.passed).slice(0, 2);
 
     socket.emit('submit_results', {
-      allPassed,
-      heartsLeft: player.hearts,
-      passedCount: totalPassed,
-      totalCount: totalTests,
-      exampleResults,
-      hiddenPassed,
-      hiddenTotal: HIDDEN_TEST_COUNT,
-      firstFailures
+      allPassed, heartsLeft: player.hearts, passedCount: totalPassed, totalCount: totalTests,
+      exampleResults, hiddenPassed, hiddenTotal: HIDDEN_TEST_COUNT, firstFailures
     });
 
-    // Notify opponent
     const opponent = room.players.find(p => p.id !== socket.id);
     if (opponent) {
-      io.to(opponent.id).emit('opponent_update', {
-        heartsLeft: player.hearts,
-        submitted: true
-      });
+      io.to(opponent.id).emit('opponent_update', { heartsLeft: player.hearts, submitted: true });
     }
 
     if (allPassed) {
@@ -737,17 +849,16 @@ io.on('connection', (socket) => {
       room.gameEnded = true;
       io.to(roomId).emit('game_over', { winner: username, reason: 'solved' });
       console.log(`🏆 ${username} WINS!`);
+      room.players.forEach(p => activeSessions.delete(p.username));
+      recordMatch(roomId, room, player, problem);
     } else if (player.hearts <= 0) {
       player.eliminated = true;
       room.gameEnded = true;
-      io.to(roomId).emit('game_over', {
-        winner: opponent?.username || 'Unknown',
-        reason: 'opponent_eliminated'
-      });
-      console.log(`💀 ${username} ELIMINATED! ${opponent?.username} wins!`);
-            // Record match in database
-        const winnerPlayer = room.players.find(p => p.id !== socket.id);
-        recordMatchElimination(roomId, room, winnerPlayer, player, problem);
+      const winnerPlayer = room.players.find(p => p.id !== socket.id);
+      io.to(roomId).emit('game_over', { winner: winnerPlayer?.username || 'Unknown', reason: 'opponent_eliminated' });
+      console.log(`💀 ${username} ELIMINATED! ${winnerPlayer?.username} wins!`);
+      room.players.forEach(p => activeSessions.delete(p.username));
+      recordMatchElimination(roomId, room, winnerPlayer, player, problem);
     }
   });
 
@@ -760,19 +871,14 @@ io.on('connection', (socket) => {
     const player = room.players.find(p => p.id === socket.id);
     if (!player || player.eliminated || player.finished) return;
 
-    // Anti-cheat: cooldown check
     const now = Date.now();
-    if (now - player.lastItemBox < ITEM_BOX_COOLDOWN) {
-      console.log(`⚠️ ${player.username} item box cooldown`);
-      return;
-    }
+    if (now - player.lastItemBox < ITEM_BOX_COOLDOWN) return;
 
     player.lastItemBox = now;
     const powerup = getRandomPowerup();
     player.powerups.push(powerup);
 
     socket.emit('powerup_earned', { powerup });
-    console.log(`🎁 ${player.username} claimed item box: ${powerup}`);
   });
 
   // === USE POWERUP ===
@@ -791,20 +897,23 @@ io.on('connection', (socket) => {
 
     const opponent = room.players.find(p => p.id !== socket.id);
     if (opponent) {
-      io.to(opponent.id).emit('sabotage_receive', {
-        type: powerupType,
-        from: player.username
-      });
-      console.log(`💥 ${player.username} used ${powerupType} on ${opponent.username}`);
+      io.to(opponent.id).emit('sabotage_receive', { type: powerupType, from: player.username });
     }
 
     socket.emit('powerups_updated', { powerups: player.powerups });
   });
 
   // === DISCONNECT ===
-  // === DISCONNECT ===
   socket.on('disconnect', () => {
     console.log(`❌ Disconnected: ${socket.id}`);
+
+    let disconnectedUsername = null;
+    for (const [username, session] of activeSessions.entries()) {
+      if (session.socketId === socket.id) {
+        disconnectedUsername = username;
+        break;
+      }
+    }
 
     const queueIndex = waitingQueue.findIndex(p => p.id === socket.id);
     if (queueIndex !== -1) waitingQueue.splice(queueIndex, 1);
@@ -812,25 +921,23 @@ io.on('connection', (socket) => {
     const roomId = playerRooms.get(socket.id);
     if (roomId) {
       const room = activeRooms.get(roomId);
-      if (room) {
-        // Only send game_over if the game hasn't already ended
-        if (!room.gameEnded) {
-          const opponent = room.players.find(p => p.id !== socket.id);
-          if (opponent && !opponent.finished && !opponent.eliminated) {
-            room.gameEnded = true;
-            io.to(opponent.id).emit('game_over', {
-              winner: opponent.username,
-              reason: 'opponent_disconnected'
-            });
-          }
+      if (room && !room.gameEnded) {
+        const opponent = room.players.find(p => p.id !== socket.id);
+        if (opponent && !opponent.finished && !opponent.eliminated) {
+          room.gameEnded = true;
+          io.to(opponent.id).emit('game_over', { winner: opponent.username, reason: 'opponent_disconnected' });
         }
-        // Clean up the room if both players disconnected
-        const otherPlayer = room.players.find(p => p.id !== socket.id);
-        if (!otherPlayer || !io.sockets.sockets.get(otherPlayer.id)) {
-          activeRooms.delete(roomId);
-        }
+        room.players.forEach(p => activeSessions.delete(p.username));
+        activeRooms.delete(roomId);
       }
       playerRooms.delete(socket.id);
+    }
+
+    if (disconnectedUsername) {
+      const session = activeSessions.get(disconnectedUsername);
+      if (session && session.socketId === socket.id) {
+        activeSessions.delete(disconnectedUsername);
+      }
     }
   });
 });

@@ -102,6 +102,13 @@ function Home() {
             >
               Sign Out
             </button>
+            <button
+  onClick={() => navigate('/shop')}
+  className="px-3 py-2 bg-gray-800 text-yellow-400 rounded-lg text-sm font-bold
+             hover:bg-gray-700 cursor-pointer transition-colors border border-gray-700"
+>
+  🛒 Shop
+</button>
           </div>
         ) : (
           <button

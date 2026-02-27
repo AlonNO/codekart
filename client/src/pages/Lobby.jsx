@@ -59,12 +59,17 @@ function Lobby() {
     newSocket.on('disconnect', () => {
       setStatus('disconnected');
     });
-
+    newSocket.on('session_kicked', (data) => {
+      setStatus('kicked');
+      alert(data.reason || 'Your session was taken over by another tab.');
+      navigate('/');
+    });
     return () => {
       newSocket.off('connect');
       newSocket.off('queue_joined');
       newSocket.off('game_start');
       newSocket.off('disconnect');
+      newSocket.off('session_kicked');
     };
   }, []);
 

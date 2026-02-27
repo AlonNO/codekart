@@ -11,6 +11,9 @@ import {
   playHeartLost, playSabotageHit, playPowerupGrab,
   playVictory, playDefeat, playItemBoxSpawn
 } from '../utils/sounds';
+import { useAuth } from '../context/AuthContext';
+import TypingFXOverlay from '../components/TypingFXOverlay';
+import { ensureMonacoTheme } from '../utils/monacoThemeLoader';
 
 const SERVER_URL = import.meta.env.PROD ? 'https://codekart-server.onrender.com' : 'http://localhost:3001';
 
@@ -40,6 +43,10 @@ const GHOST_COMMENTS = [
 ];
 
 function Arena() {
+
+  const { profile } = useAuth();
+
+
   const location = useLocation();
   const { username, roomId, players, problem: problemData } = location.state || {};
 
@@ -86,7 +93,11 @@ function Arena() {
   const customTestsRef = useRef(null);
   const ghostIntervalRef = useRef(null);
   const censorDecorationsRef = useRef([]);
-
+  const baseThemeRef = useRef('vs-dark');
+  const particlesRef = useRef('none');
+  const particleThrottleRef = useRef(0);
+  const fxRef = useRef(null);
+  const comboRef = useRef({ count: 0, last: 0 });
   useEffect(() => { codeRef.current = code; }, [code]);
   useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
   useEffect(() => { isSubmittingRef.current = isSubmitting; }, [isSubmitting]);
@@ -95,7 +106,24 @@ function Arena() {
 
   const opponent = players?.find(p => p.username !== username);
   const functionName = problem?.starterCode?.match(/function\s+(\w+)/)?.[1] || 'fn';
+useEffect(() => {
+    const base = profile?.equipped_theme || 'vs-dark';
+    baseThemeRef.current = base;
 
+    if (activeSabotage !== 'light_theme') {
+      if (monacoRef.current) {
+        // Monaco is ready — load the theme definition first, THEN apply it
+        ensureMonacoTheme(monacoRef.current, base).then(() => {
+          setEditorTheme(base);
+          monacoRef.current.editor.setTheme(base);
+        });
+      }
+      // If monaco isn't mounted yet, do NOT call setEditorTheme(base) here.
+      // handleEditorDidMount will handle it once the editor is ready.
+    }
+
+    particlesRef.current = profile?.equipped_particles || 'none';
+  }, [profile, activeSabotage]);
   // ==========================================
   // SABOTAGE HANDLERS
   // ==========================================
@@ -211,7 +239,7 @@ function Arena() {
     setTimeout(() => {
       setActiveSabotage(null);
       setSabotageAlert(null);
-      if (type === 'light_theme') setEditorTheme('vs-dark');
+      if (type === 'light_theme') setEditorTheme(baseThemeRef.current || 'vs-dark');
       if (type === 'tiny_font') setEditorFontSize(16);
       if (type === 'reverse_typing') setReverseTyping(false);
       if (type === 'vim_curse') stopVimCurse();
@@ -415,13 +443,51 @@ function Arena() {
   // ==========================================
   // EDITOR MOUNT
   // ==========================================
-  function handleEditorDidMount(editor, monaco) {
-    editorRef.current = editor;
-    monacoRef.current = monaco;
-    editor.focus();
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => doRun());
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => doSubmit());
-  }
+async function handleEditorDidMount(editor, monaco) {
+  editorRef.current = editor;
+  monacoRef.current = monaco;
+  editor.focus();
+
+  const base = baseThemeRef.current;
+  await ensureMonacoTheme(monaco, base);
+  setEditorTheme(base);
+  monaco.editor.setTheme(base);
+
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => doRun());
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => doSubmit());
+
+  editor.onDidType(() => {
+    const style = particlesRef.current;
+    if (!style || style === 'none') return;
+
+    // combo intensity (both simple + game-like)
+    const now = Date.now();
+    const c = comboRef.current;
+    if (now - c.last < 1200) c.count += 1;
+    else c.count = 1;
+    c.last = now;
+
+    const intensity = Math.min(2.5, 1 + c.count / 35);
+
+    const pos = editor.getPosition();
+    const dom = editor.getDomNode();
+    if (!pos || !dom) return;
+
+    const coords = editor.getScrolledVisiblePosition(pos);
+    if (!coords) return;
+
+    const rect = dom.getBoundingClientRect();
+    const x = rect.left + coords.left;
+    const y = rect.top + coords.top;
+
+    // Rare lightning bonus when combo is high
+    if (style === 'lightning' && Math.random() < Math.min(0.12, c.count / 120)) {
+      fxRef.current?.spawn({ x, y, style: 'lightning', intensity });
+    } else {
+      fxRef.current?.spawn({ x, y, style, intensity });
+    }
+  });
+}
 
   const handleUsePowerup = (powerupId, powerupType) => {
     const socket = socketRef.current;
@@ -441,10 +507,21 @@ function Arena() {
   if (censorActive) sabotageClasses.push('sabotage-censor');
   if (ghostTypistActive) sabotageClasses.push('sabotage-ghost');
 
-  if (!problem) {
-    return <div className="flex items-center justify-center h-screen"><p className="text-gray-400 text-xl">Loading...</p></div>;
+if (!problem || !roomId || !username) {
+    return (
+      <div className="flex items-center justify-center h-screen flex-col gap-4">
+        <p className="text-6xl">🏎️</p>
+        <p className="text-gray-400 text-xl">No active game found</p>
+        <p className="text-gray-600 text-sm">This page requires an active match to display.</p>
+        <button
+          onClick={() => window.location.href = '/'}
+          className="mt-4 px-6 py-3 bg-yellow-400 text-black rounded-xl font-bold cursor-pointer hover:bg-yellow-300 transition-colors"
+        >
+          🏁 Back to Home
+        </button>
+      </div>
+    );
   }
-
   const renderHearts = (count, max, color) =>
     Array.from({ length: max }, (_, i) => (
       <span key={i} className={`text-sm ${i < count ? color : 'text-gray-700'}`}>{i < count ? '❤️' : '🖤'}</span>
@@ -513,6 +590,7 @@ function Arena() {
       </div>
 
       {/* Main Content */}
+      
       <div className="flex flex-1 overflow-hidden relative">
         {/* Left Panel */}
         <AnimatePresence>
@@ -697,7 +775,7 @@ function Arena() {
         <VSScreen player1={username} player2={opponent?.username || '???'}
           problemTitle={problem.title} onComplete={() => setShowVS(false)} />
       )}
-
+<TypingFXOverlay ref={fxRef} />
       {/* Countdown */}
       <AnimatePresence>
         {!showVS && !gameStarted && (

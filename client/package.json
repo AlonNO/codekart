@@ -12,7 +12,9 @@
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
     "@supabase/supabase-js": "^2.98.0",
+    "canvas-confetti": "^1.9.4",
     "framer-motion": "^12.34.3",
+    "monaco-themes": "^0.4.8",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.1",

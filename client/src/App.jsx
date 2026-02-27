@@ -5,6 +5,7 @@ import Auth from './pages/Auth';
 import Lobby from './pages/Lobby';
 import Arena from './pages/Arena';
 import Leaderboard from './pages/Leaderboard';
+import Shop from './pages/Shop';
 
 function App() {
   return (
@@ -16,6 +17,8 @@ function App() {
           <Route path="/lobby" element={<Lobby />} />
           <Route path="/arena" element={<Arena />} />
           <Route path="/leaderboard" element={<Leaderboard />} />
+        <Route path="/shop" element={<Shop />} />
+
         </Routes>
       </BrowserRouter>
     </AuthProvider>
