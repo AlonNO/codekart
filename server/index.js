@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const vm = require('vm');
 require('dotenv').config();
 
 const app = express();
@@ -22,6 +23,19 @@ app.get('/ping', (req, res) => {
 });
 
 // ============================================
+// CONSTANTS
+// ============================================
+const HIDDEN_TEST_COUNT = 20;
+const MAX_HEARTS = 3;
+const ITEM_BOX_COOLDOWN = 15000; // 15 seconds minimum between claims
+
+const POWERUP_TYPES = ['blur', 'shake', 'light_theme', 'reverse_typing', 'tiny_font'];
+
+function getRandomPowerup() {
+  return POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
+}
+
+// ============================================
 // PROBLEMS DATABASE
 // ============================================
 const PROBLEMS = {
@@ -29,146 +43,284 @@ const PROBLEMS = {
     id: 'twoSum',
     title: 'Two Sum',
     description: `Given an array of integers nums and an integer target, return the indices of the two numbers that add up to target.\n\nYou may assume that each input has exactly one solution, and you may not use the same element twice.\n\nReturn the answer as an array of two numbers.`,
-    examples: [
+    displayExamples: [
       { input: 'twoSum([2, 7, 11, 15], 9)', output: '[0, 1]' },
       { input: 'twoSum([3, 2, 4], 6)', output: '[1, 2]' },
+      { input: 'twoSum([3, 3], 6)', output: '[0, 1]' },
     ],
-    testCases: [
-      { input: [JSON.stringify([2, 7, 11, 15]), '9'], expected: [0, 1] },
-      { input: [JSON.stringify([3, 2, 4]), '6'], expected: [1, 2] },
-      { input: [JSON.stringify([3, 3]), '6'], expected: [0, 1] },
-      { input: [JSON.stringify([1, 5, 3, 7]), '8'], expected: [1, 2] },
-      { input: [JSON.stringify([4, 1, 2, 3, 5]), '7'], expected: [2, 4] },
+    exampleTests: [
+      { input: [JSON.stringify([2, 7, 11, 15]), '9'] },
+      { input: [JSON.stringify([3, 2, 4]), '6'] },
+      { input: [JSON.stringify([3, 3]), '6'] },
     ],
     starterCode: `function twoSum(nums, target) {\n  // Write your solution here\n\n}`,
-    functionName: 'twoSum'
+    functionName: 'twoSum',
+    solve: (nums, target) => {
+      const map = {};
+      for (let i = 0; i < nums.length; i++) {
+        const comp = target - nums[i];
+        if (comp in map) return [map[comp], i];
+        map[nums[i]] = i;
+      }
+    },
+    validate: (inputArgs, userOutput) => {
+      const nums = JSON.parse(inputArgs[0]);
+      const target = parseInt(inputArgs[1]);
+      if (!Array.isArray(userOutput) || userOutput.length !== 2) return false;
+      const [i, j] = userOutput;
+      if (typeof i !== 'number' || typeof j !== 'number') return false;
+      if (i === j || i < 0 || j < 0 || i >= nums.length || j >= nums.length) return false;
+      return nums[i] + nums[j] === target;
+    },
+    generateHiddenTests: (count) => {
+      const tests = [];
+      for (let t = 0; t < count; t++) {
+        const len = 4 + Math.floor(Math.random() * 12);
+        const nums = [];
+        for (let j = 0; j < len; j++) {
+          nums.push(200 + j * 17 + Math.floor(Math.random() * 10));
+        }
+        const idx1 = Math.floor(Math.random() * len);
+        let idx2 = Math.floor(Math.random() * (len - 1));
+        if (idx2 >= idx1) idx2++;
+        nums[idx1] = Math.floor(Math.random() * 30) + 1;
+        nums[idx2] = Math.floor(Math.random() * 30) + 1;
+        const target = nums[idx1] + nums[idx2];
+        tests.push({ input: [JSON.stringify(nums), String(target)] });
+      }
+      return tests;
+    }
   },
+
   reverseString: {
     id: 'reverseString',
     title: 'Reverse String',
     description: `Write a function that reverses a string.\n\nThe input string is given as a string s.\n\nReturn the reversed string.`,
-    examples: [
+    displayExamples: [
       { input: 'reverseString("hello")', output: '"olleh"' },
       { input: 'reverseString("world")', output: '"dlrow"' },
+      { input: 'reverseString("racecar")', output: '"racecar"' },
     ],
-    testCases: [
-      { input: ['"hello"'], expected: 'olleh' },
-      { input: ['"world"'], expected: 'dlrow' },
-      { input: ['"abcdef"'], expected: 'fedcba' },
-      { input: ['"a"'], expected: 'a' },
-      { input: ['"racecar"'], expected: 'racecar' },
+    exampleTests: [
+      { input: ['"hello"'] },
+      { input: ['"world"'] },
+      { input: ['"racecar"'] },
     ],
     starterCode: `function reverseString(s) {\n  // Write your solution here\n\n}`,
-    functionName: 'reverseString'
+    functionName: 'reverseString',
+    solve: (s) => s.split('').reverse().join(''),
+    validate: null,
+    generateHiddenTests: (count) => {
+      const chars = 'abcdefghijklmnopqrstuvwxyz';
+      const tests = [];
+      for (let t = 0; t < count; t++) {
+        const len = 3 + Math.floor(Math.random() * 20);
+        let s = '';
+        for (let j = 0; j < len; j++) s += chars[Math.floor(Math.random() * chars.length)];
+        tests.push({ input: [`"${s}"`] });
+      }
+      return tests;
+    }
   },
+
   fizzBuzz: {
     id: 'fizzBuzz',
     title: 'FizzBuzz',
     description: `Given an integer n, return a string array answer where:\n\n- answer[i] == "FizzBuzz" if i+1 is divisible by 3 and 5\n- answer[i] == "Fizz" if i+1 is divisible by 3\n- answer[i] == "Buzz" if i+1 is divisible by 5\n- answer[i] == the string of i+1 if none of the above`,
-    examples: [
+    displayExamples: [
       { input: 'fizzBuzz(5)', output: '["1","2","Fizz","4","Buzz"]' },
       { input: 'fizzBuzz(3)', output: '["1","2","Fizz"]' },
+      { input: 'fizzBuzz(15)', output: '["1","2","Fizz","4","Buzz","Fizz","7","8","Fizz","Buzz","11","Fizz","13","14","FizzBuzz"]' },
     ],
-    testCases: [
-      { input: ['3'], expected: ["1","2","Fizz"] },
-      { input: ['5'], expected: ["1","2","Fizz","4","Buzz"] },
-      { input: ['15'], expected: ["1","2","Fizz","4","Buzz","Fizz","7","8","Fizz","Buzz","11","Fizz","13","14","FizzBuzz"] },
-      { input: ['1'], expected: ["1"] },
-      { input: ['6'], expected: ["1","2","Fizz","4","Buzz","Fizz"] },
+    exampleTests: [
+      { input: ['5'] },
+      { input: ['3'] },
+      { input: ['15'] },
     ],
     starterCode: `function fizzBuzz(n) {\n  // Write your solution here\n\n}`,
-    functionName: 'fizzBuzz'
+    functionName: 'fizzBuzz',
+    solve: (n) => {
+      const result = [];
+      for (let i = 1; i <= n; i++) {
+        if (i % 15 === 0) result.push("FizzBuzz");
+        else if (i % 3 === 0) result.push("Fizz");
+        else if (i % 5 === 0) result.push("Buzz");
+        else result.push(String(i));
+      }
+      return result;
+    },
+    validate: null,
+    generateHiddenTests: (count) => {
+      const tests = [];
+      const used = new Set();
+      for (let t = 0; t < count; t++) {
+        let n;
+        do { n = 1 + Math.floor(Math.random() * 100); } while (used.has(n));
+        used.add(n);
+        tests.push({ input: [String(n)] });
+      }
+      return tests;
+    }
   },
+
   isPalindrome: {
     id: 'isPalindrome',
     title: 'Valid Palindrome',
     description: `Given a string s, return true if it is a palindrome (reads the same forward and backward), false otherwise.\n\nOnly consider lowercase letters (no spaces or special chars will be given).`,
-    examples: [
+    displayExamples: [
       { input: 'isPalindrome("racecar")', output: 'true' },
       { input: 'isPalindrome("hello")', output: 'false' },
+      { input: 'isPalindrome("abba")', output: 'true' },
     ],
-    testCases: [
-      { input: ['"racecar"'], expected: true },
-      { input: ['"hello"'], expected: false },
-      { input: ['"abba"'], expected: true },
-      { input: ['"a"'], expected: true },
-      { input: ['"abcba"'], expected: true },
+    exampleTests: [
+      { input: ['"racecar"'] },
+      { input: ['"hello"'] },
+      { input: ['"abba"'] },
     ],
     starterCode: `function isPalindrome(s) {\n  // Write your solution here\n\n}`,
-    functionName: 'isPalindrome'
-  }
-  ,
+    functionName: 'isPalindrome',
+    solve: (s) => s === s.split('').reverse().join(''),
+    validate: null,
+    generateHiddenTests: (count) => {
+      const chars = 'abcdefghijklmnopqrstuvwxyz';
+      const tests = [];
+      for (let t = 0; t < count; t++) {
+        if (Math.random() < 0.5) {
+          const halfLen = 2 + Math.floor(Math.random() * 5);
+          let half = '';
+          for (let j = 0; j < halfLen; j++) half += chars[Math.floor(Math.random() * chars.length)];
+          const mid = Math.random() < 0.5 ? chars[Math.floor(Math.random() * chars.length)] : '';
+          const palindrome = half + mid + half.split('').reverse().join('');
+          tests.push({ input: [`"${palindrome}"`] });
+        } else {
+          const len = 4 + Math.floor(Math.random() * 10);
+          let s = '';
+          for (let j = 0; j < len; j++) s += chars[Math.floor(Math.random() * chars.length)];
+          if (s === s.split('').reverse().join('')) s += 'x';
+          tests.push({ input: [`"${s}"`] });
+        }
+      }
+      return tests;
+    }
+  },
+
   maxProfit: {
     id: 'maxProfit',
     title: 'Best Time to Buy & Sell Stock',
     description: `You are given an array prices where prices[i] is the price of a stock on the ith day.\n\nYou want to maximize profit by choosing a single day to buy and a single day to sell.\n\nReturn the maximum profit. If no profit is possible, return 0.`,
-    examples: [
+    displayExamples: [
       { input: 'maxProfit([7, 1, 5, 3, 6, 4])', output: '5' },
       { input: 'maxProfit([7, 6, 4, 3, 1])', output: '0' },
+      { input: 'maxProfit([2, 4, 1])', output: '2' },
     ],
-    testCases: [
-      { input: [JSON.stringify([7, 1, 5, 3, 6, 4])], expected: 5 },
-      { input: [JSON.stringify([7, 6, 4, 3, 1])], expected: 0 },
-      { input: [JSON.stringify([2, 4, 1])], expected: 2 },
-      { input: [JSON.stringify([1, 2])], expected: 1 },
-      { input: [JSON.stringify([3, 8, 2, 10, 1])], expected: 8 },
+    exampleTests: [
+      { input: [JSON.stringify([7, 1, 5, 3, 6, 4])] },
+      { input: [JSON.stringify([7, 6, 4, 3, 1])] },
+      { input: [JSON.stringify([2, 4, 1])] },
     ],
     starterCode: `function maxProfit(prices) {\n  // Write your solution here\n\n}`,
-    functionName: 'maxProfit'
+    functionName: 'maxProfit',
+    solve: (prices) => {
+      let min = prices[0], maxP = 0;
+      for (let i = 1; i < prices.length; i++) {
+        if (prices[i] < min) min = prices[i];
+        else maxP = Math.max(maxP, prices[i] - min);
+      }
+      return maxP;
+    },
+    validate: null,
+    generateHiddenTests: (count) => {
+      const tests = [];
+      for (let t = 0; t < count; t++) {
+        const len = 3 + Math.floor(Math.random() * 15);
+        const prices = [];
+        for (let j = 0; j < len; j++) prices.push(Math.floor(Math.random() * 200) + 1);
+        tests.push({ input: [JSON.stringify(prices)] });
+      }
+      return tests;
+    }
   },
+
   countVowels: {
     id: 'countVowels',
     title: 'Count the Vowels',
     description: `Given a string s, return the number of vowels in the string.\n\nVowels are: a, e, i, o, u (lowercase only).`,
-    examples: [
+    displayExamples: [
       { input: 'countVowels("hello")', output: '2' },
       { input: 'countVowels("aeiou")', output: '5' },
+      { input: 'countVowels("bcdfg")', output: '0' },
     ],
-    testCases: [
-      { input: ['"hello"'], expected: 2 },
-      { input: ['"aeiou"'], expected: 5 },
-      { input: ['"bcdfg"'], expected: 0 },
-      { input: ['"programming"'], expected: 3 },
-      { input: ['"a"'], expected: 1 },
+    exampleTests: [
+      { input: ['"hello"'] },
+      { input: ['"aeiou"'] },
+      { input: ['"bcdfg"'] },
     ],
     starterCode: `function countVowels(s) {\n  // Write your solution here\n\n}`,
-    functionName: 'countVowels'
+    functionName: 'countVowels',
+    solve: (s) => {
+      let count = 0;
+      for (const c of s) if ('aeiou'.includes(c)) count++;
+      return count;
+    },
+    validate: null,
+    generateHiddenTests: (count) => {
+      const chars = 'abcdefghijklmnopqrstuvwxyz';
+      const tests = [];
+      for (let t = 0; t < count; t++) {
+        const len = 3 + Math.floor(Math.random() * 25);
+        let s = '';
+        for (let j = 0; j < len; j++) s += chars[Math.floor(Math.random() * chars.length)];
+        tests.push({ input: [`"${s}"`] });
+      }
+      return tests;
+    }
   },
+
   findMax: {
     id: 'findMax',
     title: 'Find the Maximum',
     description: `Given an array of integers nums, return the largest number in the array.\n\nDo NOT use Math.max or built-in sort.`,
-    examples: [
+    displayExamples: [
       { input: 'findMax([1, 3, 2, 5, 4])', output: '5' },
       { input: 'findMax([-1, -3, -2])', output: '-1' },
+      { input: 'findMax([42])', output: '42' },
     ],
-    testCases: [
-      { input: [JSON.stringify([1, 3, 2, 5, 4])], expected: 5 },
-      { input: [JSON.stringify([-1, -3, -2])], expected: -1 },
-      { input: [JSON.stringify([42])], expected: 42 },
-      { input: [JSON.stringify([10, 20, 30, 5, 25])], expected: 30 },
-      { input: [JSON.stringify([0, 0, 0, 1, 0])], expected: 1 },
+    exampleTests: [
+      { input: [JSON.stringify([1, 3, 2, 5, 4])] },
+      { input: [JSON.stringify([-1, -3, -2])] },
+      { input: [JSON.stringify([42])] },
     ],
     starterCode: `function findMax(nums) {\n  // Write your solution here\n  // Do NOT use Math.max\n\n}`,
-    functionName: 'findMax'
+    functionName: 'findMax',
+    solve: (nums) => {
+      let max = nums[0];
+      for (let i = 1; i < nums.length; i++) if (nums[i] > max) max = nums[i];
+      return max;
+    },
+    validate: null,
+    generateHiddenTests: (count) => {
+      const tests = [];
+      for (let t = 0; t < count; t++) {
+        const len = 3 + Math.floor(Math.random() * 15);
+        const nums = [];
+        for (let j = 0; j < len; j++) nums.push(Math.floor(Math.random() * 2000) - 1000);
+        tests.push({ input: [JSON.stringify(nums)] });
+      }
+      return tests;
+    }
   }
 };
 
 const PROBLEM_IDS = Object.keys(PROBLEMS);
 
 // ============================================
-// PISTON API CODE EXECUTION
+// CODE EXECUTION ENGINE
 // ============================================
-const vm = require('vm');
+function runSingleTest(userCode, test, problem) {
+  const argsStr = test.input.join(', ');
+  const functionName = problem.functionName;
 
-async function executeCode(userCode, testCases, functionName) {
-  const results = [];
-
-  for (let i = 0; i < testCases.length; i++) {
-    const test = testCases[i];
-    const argsStr = test.input.join(', ');
-
-    const fullCode = `
+  const fullCode = `
 ${userCode}
 
 (function() {
@@ -181,52 +333,64 @@ ${userCode}
 })();
 `;
 
-    try {
-      const sandbox = {};
-      vm.createContext(sandbox);
-      const output = vm.runInContext(fullCode, sandbox, { timeout: 3000 });
+  try {
+    const sandbox = {};
+    vm.createContext(sandbox);
+    const output = vm.runInContext(fullCode, sandbox, { timeout: 2000 });
 
-      if (typeof output === 'string' && output.startsWith('ERROR:')) {
-        results.push({
-          testIndex: i,
-          input: `${functionName}(${argsStr})`,
-          expected: JSON.stringify(test.expected),
-          actual: output,
-          passed: false
-        });
-      } else {
-        let actualResult;
-        try {
-          actualResult = JSON.parse(output);
-        } catch {
-          actualResult = output;
-        }
-
-        const passed = JSON.stringify(actualResult) === JSON.stringify(test.expected);
-
-        results.push({
-          testIndex: i,
-          input: `${functionName}(${argsStr})`,
-          expected: JSON.stringify(test.expected),
-          actual: JSON.stringify(actualResult),
-          passed
-        });
-      }
-    } catch (err) {
-      results.push({
-        testIndex: i,
-        input: `${functionName}(${argsStr})`,
-        expected: JSON.stringify(test.expected),
-        actual: err.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT' 
-          ? 'Time limit exceeded (infinite loop?)' 
-          : `Error: ${err.message}`,
-        passed: false
-      });
+    if (typeof output === 'string' && output.startsWith('ERROR:')) {
+      return { passed: false, error: output };
     }
+
+    let userResult;
+    try { userResult = JSON.parse(output); } catch { userResult = output; }
+
+    // Compute expected answer using solve
+    const parsedArgs = test.input.map(a => { try { return JSON.parse(a); } catch { return a; } });
+    const expected = problem.solve(...parsedArgs);
+
+    // Check if passed
+    let passed;
+    if (problem.validate) {
+      passed = problem.validate(test.input, userResult);
+    } else {
+      passed = JSON.stringify(userResult) === JSON.stringify(expected);
+    }
+
+    return {
+      passed,
+      input: `${functionName}(${argsStr})`,
+      expected: JSON.stringify(expected),
+      actual: JSON.stringify(userResult)
+    };
+  } catch (err) {
+    return {
+      passed: false,
+      input: `${functionName}(${argsStr})`,
+      expected: '?',
+      actual: err.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT'
+        ? 'Time limit exceeded (infinite loop?)'
+        : `Error: ${err.message}`
+    };
+  }
+}
+
+function executeTests(userCode, tests, problem) {
+  const results = [];
+  let failCount = 0;
+
+  for (let i = 0; i < tests.length; i++) {
+    const result = runSingleTest(userCode, tests[i], problem);
+    result.testIndex = i;
+    results.push(result);
+    if (!result.passed) failCount++;
+    // Stop early after 3 failures to save time
+    if (failCount >= 3) break;
   }
 
   return results;
 }
+
 // ============================================
 // GAME STATE
 // ============================================
@@ -235,26 +399,15 @@ const activeRooms = new Map();
 const playerRooms = new Map();
 
 // ============================================
-// POWERUP SYSTEM
-// ============================================
-const POWERUP_TYPES = ['blur', 'shake', 'light_theme', 'reverse_typing', 'tiny_font'];
-
-function getRandomPowerup() {
-  return POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
-}
-
-// ============================================
 // SOCKET.IO CONNECTION
 // ============================================
 io.on('connection', (socket) => {
   console.log(`⚡ Player connected: ${socket.id}`);
 
+  // === MATCHMAKING ===
   socket.on('join_queue', (data) => {
     const alreadyInQueue = waitingQueue.some(p => p.id === socket.id);
-    if (alreadyInQueue) {
-      console.log(`⚠️ ${socket.id} already in queue, ignoring`);
-      return;
-    }
+    if (alreadyInQueue) return;
 
     const player = {
       id: socket.id,
@@ -262,24 +415,20 @@ io.on('connection', (socket) => {
     };
 
     waitingQueue.push(player);
-    console.log(`🎮 ${player.username} joined the queue. Queue size: ${waitingQueue.length}`);
-
+    console.log(`🎮 ${player.username} joined queue. Size: ${waitingQueue.length}`);
     socket.emit('queue_joined', { position: waitingQueue.length });
-    
+
     if (waitingQueue.length >= 2) {
       const player1 = waitingQueue.shift();
       const player2 = waitingQueue.shift();
-
       const roomId = `room_${Date.now()}`;
-      
-      // Pick a random problem
       const problemId = PROBLEM_IDS[Math.floor(Math.random() * PROBLEM_IDS.length)];
       const problem = PROBLEMS[problemId];
 
       activeRooms.set(roomId, {
         players: [
-          { ...player1, testsPassed: 0, powerups: [], finished: false },
-          { ...player2, testsPassed: 0, powerups: [], finished: false }
+          { ...player1, hearts: MAX_HEARTS, powerups: [], finished: false, eliminated: false, lastItemBox: 0 },
+          { ...player2, hearts: MAX_HEARTS, powerups: [], finished: false, eliminated: false, lastItemBox: 0 }
         ],
         problemId,
         startTime: Date.now()
@@ -288,11 +437,10 @@ io.on('connection', (socket) => {
       playerRooms.set(player1.id, roomId);
       playerRooms.set(player2.id, roomId);
 
-      const socket1 = io.sockets.sockets.get(player1.id);
-      const socket2 = io.sockets.sockets.get(player2.id);
-
-      if (socket1) socket1.join(roomId);
-      if (socket2) socket2.join(roomId);
+      const s1 = io.sockets.sockets.get(player1.id);
+      const s2 = io.sockets.sockets.get(player2.id);
+      if (s1) s1.join(roomId);
+      if (s2) s2.join(roomId);
 
       io.to(roomId).emit('game_start', {
         roomId,
@@ -304,21 +452,21 @@ io.on('connection', (socket) => {
           id: problem.id,
           title: problem.title,
           description: problem.description,
-          examples: problem.examples,
+          examples: problem.displayExamples,
           starterCode: problem.starterCode,
-          totalTests: problem.testCases.length
+          totalHiddenTests: HIDDEN_TEST_COUNT,
+          maxHearts: MAX_HEARTS
         }
       });
 
-      console.log(`🏁 Match started! Room: ${roomId} | ${player1.username} vs ${player2.username} | Problem: ${problem.title}`);
+      console.log(`🏁 Match! ${roomId} | ${player1.username} vs ${player2.username} | ${problem.title}`);
     }
   });
 
-  // Player rejoins room from Arena page
+  // === REJOIN ROOM ===
   socket.on('rejoin_room', (data) => {
     const { roomId, username } = data;
     socket.join(roomId);
-
     const room = activeRooms.get(roomId);
     if (room) {
       const player = room.players.find(p => p.username === username);
@@ -328,103 +476,163 @@ io.on('connection', (socket) => {
         playerRooms.set(socket.id, roomId);
       }
     }
-
-    console.log(`🔄 ${username} rejoined room ${roomId} with socket ${socket.id}`);
+    console.log(`🔄 ${username} rejoined ${roomId}`);
   });
 
-  // Player submits code
-  socket.on('code_submit', async (data) => {
-    const { roomId, code, username } = data;
-    console.log(`📝 Code submitted by ${username}`);
-
+  // === RUN CODE (Examples only, infinite uses) ===
+  // === RUN CODE (Custom tests, infinite uses) ===
+  socket.on('run_code', (data) => {
+    const { roomId, code, customTests } = data;
     const room = activeRooms.get(roomId);
-    if (!room) {
-      socket.emit('test_results', { results: [{ passed: false, input: 'N/A', expected: 'N/A', actual: 'Room not found' }] });
-      return;
-    }
+    if (!room) return;
 
-    const problem = PROBLEMS[room.problemId || 'twoSum'];
-    const player = room.players.find(p => p.id === socket.id);
-    if (!player) return;
+    const problem = PROBLEMS[room.problemId];
 
-    // Initialize highestPassed tracker if not exists
-    if (player.highestPassed === undefined) {
-      player.highestPassed = 0;
-    }
-
-    // Check for cheat code (demo fallback)
-    if (code.includes('// FORCE_WIN')) {
-      const fakeResults = problem.testCases.map((t, i) => ({
-        testIndex: i,
-        input: `${problem.functionName}(${t.input.join(', ')})`,
-        expected: JSON.stringify(t.expected),
-        actual: JSON.stringify(t.expected),
-        passed: true
+    // Use custom tests if provided, otherwise use examples
+    let testsToRun;
+    if (customTests && customTests.length > 0) {
+      // Parse custom test inputs from strings
+      testsToRun = customTests.map(test => ({
+        input: test.input
       }));
+    } else {
+      testsToRun = problem.exampleTests;
+    }
 
-      socket.emit('test_results', { results: fakeResults });
-      player.testsPassed = problem.testCases.length;
-      player.highestPassed = problem.testCases.length;
-      player.finished = true;
+    // Limit to 10 custom tests max
+    testsToRun = testsToRun.slice(0, 10);
 
-      const opponentId = room.players.find(p => p.id !== socket.id)?.id;
-      if (opponentId) {
-        io.to(opponentId).emit('opponent_progress', { testsPassed: player.testsPassed });
-      }
+    const results = executeTests(code, testsToRun, problem);
 
-      io.to(roomId).emit('game_over', { winner: player.username });
-      console.log(`🏆 ${player.username} WINS (cheat code)!`);
+    socket.emit('run_results', {
+      results,
+      passedCount: results.filter(r => r.passed).length,
+      totalCount: results.length
+    });
+
+    console.log(`▶ Run: ${results.filter(r => r.passed).length}/${results.length} passed`);
+  });
+
+  // === SUBMIT CODE (Hidden tests, costs a heart) ===
+  socket.on('submit_code', (data) => {
+    const { roomId, code, username } = data;
+    const room = activeRooms.get(roomId);
+    if (!room) return;
+
+    const problem = PROBLEMS[room.problemId];
+    const player = room.players.find(p => p.id === socket.id);
+    if (!player || player.eliminated || player.finished) return;
+
+    if (player.hearts <= 0) {
+      socket.emit('submit_error', { message: 'No hearts left!' });
       return;
     }
 
-    // Execute code
-    try {
-      const results = await executeCode(code, problem.testCases, problem.functionName);
-      const passed = results.filter(r => r.passed).length;
+    // FORCE_WIN cheat code for demos
+    if (code.includes('// FORCE_WIN')) {
+      player.finished = true;
+      socket.emit('submit_results', {
+        allPassed: true,
+        heartsLeft: player.hearts,
+        passedCount: HIDDEN_TEST_COUNT + problem.exampleTests.length,
+        totalCount: HIDDEN_TEST_COUNT + problem.exampleTests.length,
+        exampleResults: problem.exampleTests.map((t, i) => ({
+          testIndex: i, passed: true,
+          input: `${problem.functionName}(${t.input.join(', ')})`,
+          expected: 'OK', actual: 'OK'
+        })),
+        hiddenPassed: HIDDEN_TEST_COUNT,
+        hiddenTotal: HIDDEN_TEST_COUNT,
+        firstFailures: []
+      });
+      room.gameEnded = true;
+      io.to(roomId).emit('game_over', { winner: username, reason: 'solved' });
+      console.log(`🏆 ${username} WINS (cheat code)!`);
+      return;
+    }
 
-      // Send results back to the player
-      socket.emit('test_results', { results });
+    // Run examples first
+    const exampleResults = executeTests(code, problem.exampleTests, problem);
+    const examplesPassed = exampleResults.filter(r => r.passed).length;
 
-      // Update current tests passed
-      player.testsPassed = passed;
+    // Generate fresh hidden tests
+    const hiddenTests = problem.generateHiddenTests(HIDDEN_TEST_COUNT);
+    const hiddenResults = executeTests(code, hiddenTests, problem);
+    const hiddenPassed = hiddenResults.filter(r => r.passed).length;
 
-      // Only award powerups for BEATING your previous best
-      if (passed > player.highestPassed && !player.finished) {
-        const newTestsBeyondRecord = passed - player.highestPassed;
-        const powerupsToAward = Math.max(1, Math.floor(newTestsBeyondRecord / 2));
+    const totalPassed = examplesPassed + hiddenPassed;
+    const totalTests = problem.exampleTests.length + HIDDEN_TEST_COUNT;
+    const allPassed = totalPassed === totalTests;
 
-        for (let i = 0; i < powerupsToAward; i++) {
-          const newPowerup = getRandomPowerup();
-          player.powerups.push(newPowerup);
-          socket.emit('powerup_earned', { powerup: newPowerup, totalPassed: passed });
-          console.log(`🎁 ${username} earned powerup: ${newPowerup} (new record: ${passed}/${problem.testCases.length})`);
-        }
+    if (!allPassed) {
+      player.hearts -= 1;
+      console.log(`💔 ${username} failed submit. Hearts: ${player.hearts}`);
+    }
 
-        // Update the high water mark
-        player.highestPassed = passed;
-      }
+    // Get first 2 hidden failures for display
+    const firstFailures = hiddenResults.filter(r => !r.passed).slice(0, 2);
 
-      // Notify opponent of progress
-      const opponentId = room.players.find(p => p.id !== socket.id)?.id;
-      if (opponentId) {
-        io.to(opponentId).emit('opponent_progress', { testsPassed: passed });
-      }
+    socket.emit('submit_results', {
+      allPassed,
+      heartsLeft: player.hearts,
+      passedCount: totalPassed,
+      totalCount: totalTests,
+      exampleResults,
+      hiddenPassed,
+      hiddenTotal: HIDDEN_TEST_COUNT,
+      firstFailures
+    });
 
-      // Check win condition
-      if (passed === problem.testCases.length && !player.finished) {
-        player.finished = true;
-        io.to(roomId).emit('game_over', { winner: player.username });
-        console.log(`🏆 ${player.username} WINS!`);
-      }
-    } catch (err) {
-      console.error('Execution error:', err.message);
-      socket.emit('test_results', {
-        results: [{ passed: false, input: 'N/A', expected: 'N/A', actual: 'Server execution error' }]
+    // Notify opponent
+    const opponent = room.players.find(p => p.id !== socket.id);
+    if (opponent) {
+      io.to(opponent.id).emit('opponent_update', {
+        heartsLeft: player.hearts,
+        submitted: true
       });
     }
+
+    if (allPassed) {
+      player.finished = true;
+      room.gameEnded = true;
+      io.to(roomId).emit('game_over', { winner: username, reason: 'solved' });
+      console.log(`🏆 ${username} WINS!`);
+    } else if (player.hearts <= 0) {
+      player.eliminated = true;
+      room.gameEnded = true;
+      io.to(roomId).emit('game_over', {
+        winner: opponent?.username || 'Unknown',
+        reason: 'opponent_eliminated'
+      });
+      console.log(`💀 ${username} ELIMINATED! ${opponent?.username} wins!`);
+    }
   });
 
-  // Player uses a power-up
+  // === CLAIM ITEM BOX ===
+  socket.on('claim_itembox', (data) => {
+    const { roomId } = data;
+    const room = activeRooms.get(roomId);
+    if (!room) return;
+
+    const player = room.players.find(p => p.id === socket.id);
+    if (!player || player.eliminated || player.finished) return;
+
+    // Anti-cheat: cooldown check
+    const now = Date.now();
+    if (now - player.lastItemBox < ITEM_BOX_COOLDOWN) {
+      console.log(`⚠️ ${player.username} item box cooldown`);
+      return;
+    }
+
+    player.lastItemBox = now;
+    const powerup = getRandomPowerup();
+    player.powerups.push(powerup);
+
+    socket.emit('powerup_earned', { powerup });
+    console.log(`🎁 ${player.username} claimed item box: ${powerup}`);
+  });
+
+  // === USE POWERUP ===
   socket.on('use_powerup', (data) => {
     const { roomId, powerupType } = data;
     const room = activeRooms.get(roomId);
@@ -433,17 +641,11 @@ io.on('connection', (socket) => {
     const player = room.players.find(p => p.id === socket.id);
     if (!player) return;
 
-    // Check if player actually has this powerup
-    const powerupIndex = player.powerups.indexOf(powerupType);
-    if (powerupIndex === -1) {
-      socket.emit('powerup_error', { message: 'You don\'t have that powerup!' });
-      return;
-    }
+    const idx = player.powerups.indexOf(powerupType);
+    if (idx === -1) return;
 
-    // Remove the used powerup
-    player.powerups.splice(powerupIndex, 1);
+    player.powerups.splice(idx, 1);
 
-    // Find opponent and send sabotage
     const opponent = room.players.find(p => p.id !== socket.id);
     if (opponent) {
       io.to(opponent.id).emit('sabotage_receive', {
@@ -453,30 +655,37 @@ io.on('connection', (socket) => {
       console.log(`💥 ${player.username} used ${powerupType} on ${opponent.username}`);
     }
 
-    // Tell the player their updated powerup inventory
     socket.emit('powerups_updated', { powerups: player.powerups });
   });
 
+  // === DISCONNECT ===
+  // === DISCONNECT ===
   socket.on('disconnect', () => {
-    console.log(`❌ Player disconnected: ${socket.id}`);
+    console.log(`❌ Disconnected: ${socket.id}`);
 
     const queueIndex = waitingQueue.findIndex(p => p.id === socket.id);
-    if (queueIndex !== -1) {
-      waitingQueue.splice(queueIndex, 1);
-    }
+    if (queueIndex !== -1) waitingQueue.splice(queueIndex, 1);
 
     const roomId = playerRooms.get(socket.id);
     if (roomId) {
       const room = activeRooms.get(roomId);
       if (room) {
-        const opponent = room.players.find(p => p.id !== socket.id);
-        if (opponent) {
-          io.to(opponent.id).emit('game_over', {
-            winner: opponent.username,
-            reason: 'opponent_disconnected'
-          });
+        // Only send game_over if the game hasn't already ended
+        if (!room.gameEnded) {
+          const opponent = room.players.find(p => p.id !== socket.id);
+          if (opponent && !opponent.finished && !opponent.eliminated) {
+            room.gameEnded = true;
+            io.to(opponent.id).emit('game_over', {
+              winner: opponent.username,
+              reason: 'opponent_disconnected'
+            });
+          }
         }
-        activeRooms.delete(roomId);
+        // Clean up the room if both players disconnected
+        const otherPlayer = room.players.find(p => p.id !== socket.id);
+        if (!otherPlayer || !io.sockets.sockets.get(otherPlayer.id)) {
+          activeRooms.delete(roomId);
+        }
       }
       playerRooms.delete(socket.id);
     }

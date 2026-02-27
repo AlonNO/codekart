@@ -3,23 +3,19 @@ import { useLocation } from 'react-router-dom';
 import Editor from '@monaco-editor/react';
 import { io } from 'socket.io-client';
 import { motion, AnimatePresence } from 'framer-motion';
+import ItemBox from '../components/ItemBox';
+import TestCases from '../components/TestCases';
 
 const SERVER_URL = import.meta.env.PROD ? 'https://codekart-server.onrender.com' : 'http://localhost:3001';
 
 const POWERUP_EMOJIS = {
-  blur: '🌫️',
-  shake: '📳',
-  light_theme: '☀️',
-  reverse_typing: '🔀',
-  tiny_font: '🔍'
+  blur: '🌫️', shake: '📳', light_theme: '☀️',
+  reverse_typing: '🔀', tiny_font: '🔍'
 };
 
 const POWERUP_NAMES = {
-  blur: 'Smoke Screen',
-  shake: 'Earthquake',
-  light_theme: 'Flashbang',
-  reverse_typing: 'Dyslexia',
-  tiny_font: 'Ant Font'
+  blur: 'Smoke Screen', shake: 'Earthquake', light_theme: 'Flashbang',
+  reverse_typing: 'Dyslexia', tiny_font: 'Ant Font'
 };
 
 function Arena() {
@@ -28,12 +24,15 @@ function Arena() {
 
   const [problem] = useState(problemData || null);
   const [code, setCode] = useState(problemData?.starterCode || '');
-  const [testResults, setTestResults] = useState([]);
+  const [runResults, setRunResults] = useState(null);
+  const [submitResults, setSubmitResults] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [myTestsPassed, setMyTestsPassed] = useState(0);
-  const [opponentTestsPassed, setOpponentTestsPassed] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hearts, setHearts] = useState(problemData?.maxHearts || 3);
+  const [opponentHearts, setOpponentHearts] = useState(problemData?.maxHearts || 3);
   const [gameOver, setGameOver] = useState(false);
   const [winner, setWinner] = useState(null);
+  const [winReason, setWinReason] = useState('');
   const [connected, setConnected] = useState(false);
   const [powerups, setPowerups] = useState([]);
   const [activeSabotage, setActiveSabotage] = useState(null);
@@ -44,6 +43,10 @@ function Arena() {
   const [reverseTyping, setReverseTyping] = useState(false);
   const [countdown, setCountdown] = useState(3);
   const [gameStarted, setGameStarted] = useState(false);
+  const [heartShake, setHeartShake] = useState(false);
+  const [showPanel, setShowPanel] = useState(true);
+  const [activeTab, setActiveTab] = useState('problem'); // 'problem' | 'results'
+  const [customTests, setCustomTests] = useState(null);
 
   const socketRef = useRef(null);
   const editorRef = useRef(null);
@@ -51,25 +54,28 @@ function Arena() {
   const powerupIdCounter = useRef(0);
   const codeRef = useRef(code);
   const isRunningRef = useRef(false);
+  const isSubmittingRef = useRef(false);
   const gameStartedRef = useRef(false);
+  const lastRunTime = useRef(0);
+  const customTestsRef = useRef(null);
 
-  // Keep refs in sync
   useEffect(() => { codeRef.current = code; }, [code]);
   useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
+  useEffect(() => { isSubmittingRef.current = isSubmitting; }, [isSubmitting]);
   useEffect(() => { gameStartedRef.current = gameStarted; }, [gameStarted]);
+  useEffect(() => { customTestsRef.current = customTests; }, [customTests]);
 
   const opponent = players?.find(p => p.username !== username);
-  const totalTests = problem?.totalTests || 5;
 
-  // Sabotage handler
+  // Extract function name from problem
+  const functionName = problem?.starterCode?.match(/function\s+(\w+)/)?.[1] || 'fn';
+
   const applySabotage = useCallback((type, from) => {
     setSabotageAlert({ type, from });
     setActiveSabotage(type);
-
     if (type === 'light_theme') setEditorTheme('light');
     if (type === 'tiny_font') setEditorFontSize(8);
     if (type === 'reverse_typing') setReverseTyping(true);
-
     const duration = type === 'light_theme' ? 8000 : 5000;
     setTimeout(() => {
       setActiveSabotage(null);
@@ -80,24 +86,61 @@ function Arena() {
     }, duration);
   }, []);
 
-  // Submit handler
-  const lastSubmitTime = useRef(0);
+  // Handle test case changes from TestCases component
+  const handleTestCasesChange = useCallback((testCases) => {
+    // Convert to server format: { input: ['arg1', 'arg2'] }
+    const parsed = testCases.map(tc => {
+      // Split args string into individual arguments
+      // This is tricky because args can contain commas inside arrays/strings
+      // Simple approach: wrap in array brackets and parse
+      try {
+        const argsArray = Function(`"use strict"; return [${tc.args}]`)();
+        return {
+          input: argsArray.map(a => typeof a === 'string' ? `"${a}"` : JSON.stringify(a))
+        };
+      } catch {
+        return { input: [tc.args] };
+      }
+    }).filter(t => t.input.some(i => i.length > 0));
+
+    setCustomTests(parsed.length > 0 ? parsed : null);
+  }, []);
+
+  const doRun = useCallback(() => {
+    const socket = socketRef.current;
+    if (!socket || isRunningRef.current || isSubmittingRef.current || !gameStartedRef.current) return;
+    const now = Date.now();
+    if (now - lastRunTime.current < 2000) return;
+    lastRunTime.current = now;
+    setIsRunning(true);
+    setRunResults(null);
+    setSubmitResults(null);
+    setActiveTab('results');
+    socket.emit('run_code', {
+      roomId,
+      code: codeRef.current,
+      customTests: customTestsRef.current
+    });
+  }, [roomId]);
 
   const doSubmit = useCallback(() => {
     const socket = socketRef.current;
-    if (!socket || isRunningRef.current || !gameStartedRef.current) return;
+    if (!socket || isRunningRef.current || isSubmittingRef.current || !gameStartedRef.current) return;
+    if (hearts <= 0) return;
+    setIsSubmitting(true);
+    setRunResults(null);
+    setSubmitResults(null);
+    setActiveTab('results');
+    socket.emit('submit_code', { roomId, code: codeRef.current, username });
+  }, [roomId, username, hearts]);
 
-    // 2 second cooldown between submissions
-    const now = Date.now();
-    if (now - lastSubmitTime.current < 2000) return;
-    lastSubmitTime.current = now;
+  const handleClaimItemBox = useCallback(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+    socket.emit('claim_itembox', { roomId });
+  }, [roomId]);
 
-    setIsRunning(true);
-    setTestResults([]);
-    socket.emit('code_submit', { roomId, code: codeRef.current, username });
-  }, [roomId, username]);
-
-  // Countdown then Timer
+  // Countdown
   useEffect(() => {
     let count = 3;
     const countdownInterval = setInterval(() => {
@@ -106,49 +149,32 @@ function Arena() {
       if (count <= 0) {
         clearInterval(countdownInterval);
         setGameStarted(true);
-        timerRef.current = setInterval(() => {
-          setTimer(prev => prev + 1);
-        }, 1000);
+        timerRef.current = setInterval(() => setTimer(prev => prev + 1), 1000);
       }
     }, 1000);
-
-    return () => {
-      clearInterval(countdownInterval);
-      clearInterval(timerRef.current);
-    };
+    return () => { clearInterval(countdownInterval); clearInterval(timerRef.current); };
   }, []);
 
-  const formatTime = (seconds) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
+  const formatTime = (s) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
 
-  // Socket connection
+  // Socket
   useEffect(() => {
     const newSocket = io(SERVER_URL, { forceNew: true });
     socketRef.current = newSocket;
 
-    newSocket.on('connect', () => {
-      console.log('🎮 Arena connected:', newSocket.id);
-      setConnected(true);
-      newSocket.emit('rejoin_room', { roomId, username });
+    newSocket.on('connect', () => { setConnected(true); newSocket.emit('rejoin_room', { roomId, username }); });
+
+    newSocket.on('run_results', (data) => { setRunResults(data); setIsRunning(false); });
+
+    newSocket.on('submit_results', (data) => {
+      setSubmitResults(data); setIsSubmitting(false); setHearts(data.heartsLeft);
+      if (!data.allPassed) { setHeartShake(true); setTimeout(() => setHeartShake(false), 600); }
     });
 
-    newSocket.on('test_results', (data) => {
-      setTestResults(data.results);
-      setIsRunning(false);
-      const passed = data.results.filter(r => r.passed).length;
-      setMyTestsPassed(passed);
-    });
-
-    newSocket.on('opponent_progress', (data) => {
-      setOpponentTestsPassed(data.testsPassed);
-    });
+    newSocket.on('opponent_update', (data) => { if (data.heartsLeft !== undefined) setOpponentHearts(data.heartsLeft); });
 
     newSocket.on('game_over', (data) => {
-      setGameOver(true);
-      setWinner(data.winner);
+      setGameOver(true); setWinner(data.winner); setWinReason(data.reason || 'solved');
       clearInterval(timerRef.current);
     });
 
@@ -164,63 +190,35 @@ function Arena() {
       }));
     });
 
-    newSocket.on('sabotage_receive', (data) => {
-      console.log('💥 SABOTAGED:', data.type, 'from', data.from);
-      applySabotage(data.type, data.from);
-    });
+    newSocket.on('sabotage_receive', (data) => applySabotage(data.type, data.from));
 
-    return () => {
-      newSocket.disconnect();
-    };
+    return () => newSocket.disconnect();
   }, [applySabotage, roomId, username]);
 
-  // Reverse typing interceptor
+  // Reverse typing
   useEffect(() => {
     if (!reverseTyping || !editorRef.current) return;
-
     const editor = editorRef.current;
-
     const disposable = editor.onKeyDown((e) => {
       if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault();
-        e.stopPropagation();
-
+        e.preventDefault(); e.stopPropagation();
         const swapMap = {
-          'a': 's', 's': 'a', 'd': 'f', 'f': 'd',
-          'g': 'h', 'h': 'g', 'j': 'k', 'k': 'j',
-          'l': ';', ';': 'l', 'q': 'w', 'w': 'q',
-          'e': 'r', 'r': 'e', 't': 'y', 'y': 't',
-          'u': 'i', 'i': 'u', 'o': 'p', 'p': 'o',
-          'z': 'x', 'x': 'z', 'c': 'v', 'v': 'c',
-          'b': 'n', 'n': 'b', 'm': ',', ',': 'm',
-          '(': ')', ')': '(', '[': ']', ']': '[',
-          '{': '}', '}': '{',
+          'a':'s','s':'a','d':'f','f':'d','g':'h','h':'g','j':'k','k':'j',
+          'q':'w','w':'q','e':'r','r':'e','t':'y','y':'t','u':'i','i':'u','o':'p','p':'o',
+          'z':'x','x':'z','c':'v','v':'c','b':'n','n':'b',
+          '(':')',')'  :'(','[':']',']':'[','{':'}','}':'{',
         };
-
-        const original = e.key;
-        const swapped = swapMap[original.toLowerCase()] || original;
-        const finalChar = original === original.toUpperCase() && original !== original.toLowerCase()
-          ? swapped.toUpperCase()
-          : swapped;
-
-        editor.trigger('keyboard', 'type', { text: finalChar });
+        editor.trigger('keyboard', 'type', { text: swapMap[e.key.toLowerCase()] || e.key });
       }
     });
-
     return () => disposable.dispose();
   }, [reverseTyping]);
 
   function handleEditorDidMount(editor, monaco) {
     editorRef.current = editor;
     editor.focus();
-
-    // Ctrl+Enter to submit
-    editor.addCommand(
-      monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
-      () => {
-        doSubmit();
-      }
-    );
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => doRun());
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => doSubmit());
   }
 
   const handleUsePowerup = (powerupId, powerupType) => {
@@ -236,218 +234,301 @@ function Arena() {
   if (activeSabotage === 'reverse_typing') sabotageClasses.push('sabotage-reverse');
 
   if (!problem) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <p className="text-gray-400 text-xl">Loading problem...</p>
-      </div>
-    );
+    return <div className="flex items-center justify-center h-screen"><p className="text-gray-400 text-xl">Loading...</p></div>;
   }
+
+  const renderHearts = (count, max, color) =>
+    Array.from({ length: max }, (_, i) => (
+      <span key={i} className={`text-sm ${i < count ? color : 'text-gray-700'}`}>{i < count ? '❤️' : '🖤'}</span>
+    ));
 
   return (
     <div className={`h-screen flex flex-col bg-[#0a0a0f] ${sabotageClasses.join(' ')}`}>
-      {/* Sabotage Alert Banner */}
+      <ItemBox onClaim={handleClaimItemBox} gameStarted={gameStarted} gameOver={gameOver} />
+
+      {/* Sabotage Alert */}
       <AnimatePresence>
         {sabotageAlert && (
-          <motion.div
-            initial={{ y: -100, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -100, opacity: 0 }}
-            className="absolute top-0 left-0 right-0 z-50 bg-red-600 text-white text-center py-3 font-bold text-lg"
-          >
-            💥 {sabotageAlert.from} used {POWERUP_NAMES[sabotageAlert.type] || sabotageAlert.type} on you!
+          <motion.div initial={{ y: -100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -100, opacity: 0 }}
+            className="absolute top-0 left-0 right-0 z-50 bg-red-600 text-white text-center py-3 font-bold text-lg">
+            💥 {sabotageAlert.from} used {POWERUP_NAMES[sabotageAlert.type]} on you!
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Top Bar */}
-      <div className="flex items-center justify-between px-6 py-3 bg-gray-900 border-b border-gray-800">
-        <div className="flex items-center gap-3">
-          <span className="text-xl font-bold">
-            <span className="text-white">Code</span>
-            <span className="text-yellow-400">Kart</span>
+      <div className="flex items-center justify-between px-3 md:px-6 py-2 md:py-3 bg-gray-900 border-b border-gray-800">
+        <div className="flex items-center gap-2 md:gap-3">
+          {/* Panel Toggle */}
+          <button
+            onClick={() => setShowPanel(!showPanel)}
+            className="w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center
+                       text-gray-400 hover:text-white hover:bg-gray-700 cursor-pointer transition-colors text-sm"
+            title={showPanel ? 'Hide problem' : 'Show problem'}
+          >
+            {showPanel ? '◀' : '▶'}
+          </button>
+
+          <span className="text-lg md:text-xl font-bold">
+            <span className="text-white">Code</span><span className="text-yellow-400">Kart</span>
           </span>
-          <span className="text-gray-500">|</span>
-          <span className="text-yellow-400 text-sm font-mono">{formatTime(timer)}</span>
+          <span className="text-yellow-400 text-xs md:text-sm font-mono">{formatTime(timer)}</span>
         </div>
 
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <span className="text-green-400 text-sm font-bold">{username}</span>
-            <div className="w-40 h-3 bg-gray-800 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-green-400 rounded-full transition-all duration-500"
-                style={{ width: `${(myTestsPassed / totalTests) * 100}%` }}
-              />
+        {/* Hearts */}
+        <div className="flex items-center gap-2 md:gap-6">
+          <div className="flex items-center gap-1 md:gap-2">
+            <span className="text-green-400 text-xs md:text-sm font-bold hidden sm:inline">{username}</span>
+            <div className={`flex gap-0.5 ${heartShake ? 'animate-bounce' : ''}`}>
+              {renderHearts(hearts, problem.maxHearts, 'text-green-400')}
             </div>
-            <span className="text-green-400 text-xs">{myTestsPassed}/{totalTests}</span>
           </div>
-          <span className="text-gray-600 font-bold">VS</span>
-          <div className="flex items-center gap-2">
-            <span className="text-red-400 text-sm font-bold">{opponent?.username || '???'}</span>
-            <div className="w-40 h-3 bg-gray-800 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-red-400 rounded-full transition-all duration-500"
-                style={{ width: `${(opponentTestsPassed / totalTests) * 100}%` }}
-              />
+          <span className="text-gray-600 font-bold text-xs md:text-sm">VS</span>
+          <div className="flex items-center gap-1 md:gap-2">
+            <span className="text-red-400 text-xs md:text-sm font-bold hidden sm:inline">{opponent?.username || '???'}</span>
+            <div className="flex gap-0.5">
+              {renderHearts(opponentHearts, problem.maxHearts, 'text-red-400')}
             </div>
-            <span className="text-red-400 text-xs">{opponentTestsPassed}/{totalTests}</span>
           </div>
         </div>
 
-        <div className={`text-sm ${connected ? 'text-green-400' : 'text-red-400'}`}>
-          {connected ? '⚡ Live' : '🔴 Reconnecting...'}
+        <div className={`text-xs md:text-sm ${connected ? 'text-green-400' : 'text-red-400'}`}>
+          {connected ? '⚡' : '🔴'}
+          <span className="hidden md:inline"> {connected ? 'Live' : 'Reconnecting...'}</span>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left Panel */}
-        <div className="w-96 bg-gray-900 border-r border-gray-800 p-6 overflow-y-auto">
-          <h2 className="text-2xl font-bold text-yellow-400 mb-4">{problem.title}</h2>
-          <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-line mb-6">
-            {problem.description}
-          </p>
-
-          <h3 className="text-sm font-bold text-gray-400 mb-3">EXAMPLES</h3>
-          {problem.examples.map((ex, i) => (
-            <div key={i} className="bg-gray-800 rounded-lg p-3 mb-3 font-mono text-sm">
-              <p className="text-gray-400">Input: <span className="text-green-400">{ex.input}</span></p>
-              <p className="text-gray-400">Output: <span className="text-yellow-400">{ex.output}</span></p>
-            </div>
-          ))}
-
-          <div className="mt-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
-            <p className="text-gray-400 text-xs">
-              📋 {problem.examples.length} examples shown | {totalTests} total hidden tests
-            </p>
-          </div>
-
-          {testResults.length > 0 && (
-            <div className="mt-6">
-              <h3 className="text-sm font-bold text-gray-400 mb-3">
-                TEST RESULTS — {testResults.filter(r => r.passed).length}/{testResults.length} passed
-              </h3>
-              {testResults.map((result, i) => (
-                <div
-                  key={i}
-                  className={`rounded-lg p-3 mb-2 text-sm font-mono ${
-                    result.passed
-                      ? 'bg-green-900/30 border border-green-800 text-green-400'
-                      : 'bg-red-900/30 border border-red-800 text-red-400'
-                  }`}
-                >
-                  <p>{result.passed ? '✅' : '❌'} Test {i + 1}: {result.input}</p>
-                  {!result.passed && (
-                    <p className="text-xs mt-1">
-                      Expected: {result.expected} | Got: {result.actual}
-                    </p>
-                  )}
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Left Panel - Collapsible */}
+        <AnimatePresence>
+          {showPanel && (
+            <motion.div
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 'auto', opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="bg-gray-900 border-r border-gray-800 overflow-hidden flex-shrink-0"
+            >
+              <div className="w-80 md:w-96 h-full overflow-y-auto p-4 md:p-6">
+                {/* Tabs */}
+                <div className="flex gap-2 mb-4">
+                  <button
+                    onClick={() => setActiveTab('problem')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
+                      activeTab === 'problem'
+                        ? 'bg-yellow-400 text-black'
+                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                    }`}
+                  >
+                    📋 Problem
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('results')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
+                      activeTab === 'results'
+                        ? 'bg-yellow-400 text-black'
+                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                    }`}
+                  >
+                    📊 Results
+                    {(runResults || submitResults) && (
+                      <span className="ml-1 w-2 h-2 bg-green-400 rounded-full inline-block" />
+                    )}
+                  </button>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
 
-        {/* Right Panel */}
-        <div className="flex-1 flex flex-col">
-          {/* Reverse typing warning */}
+                {/* Problem Tab */}
+                {activeTab === 'problem' && (
+                  <>
+                    <h2 className="text-xl md:text-2xl font-bold text-yellow-400 mb-3">{problem.title}</h2>
+                    <p className="text-gray-300 text-xs md:text-sm leading-relaxed whitespace-pre-line mb-4">
+                      {problem.description}
+                    </p>
+
+                    <h3 className="text-xs font-bold text-gray-400 mb-2">EXAMPLES</h3>
+                    {problem.examples.map((ex, i) => (
+                      <div key={i} className="bg-gray-800 rounded-lg p-2 md:p-3 mb-2 font-mono text-xs md:text-sm">
+                        <p className="text-gray-400">Input: <span className="text-green-400">{ex.input}</span></p>
+                        <p className="text-gray-400">Output: <span className="text-yellow-400">{ex.output}</span></p>
+                      </div>
+                    ))}
+
+                    {/* Custom Test Cases */}
+                    <TestCases
+                      examples={problem.examples}
+                      functionName={functionName}
+                      onTestCasesChange={handleTestCasesChange}
+                    />
+
+                    <div className="mt-3 p-2 bg-gray-800/50 rounded-lg border border-gray-700">
+                      <p className="text-gray-400 text-xs">
+                        🚀 Submit runs {problem.totalHiddenTests} hidden tests • {problem.maxHearts} attempts
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {/* Results Tab */}
+                {activeTab === 'results' && (
+                  <>
+                    {!runResults && !submitResults && (
+                      <div className="text-center py-12">
+                        <p className="text-gray-600 text-3xl mb-3">📭</p>
+                        <p className="text-gray-500 text-sm">No results yet</p>
+                        <p className="text-gray-600 text-xs mt-1">Click "Run Code" or "Submit" to see results</p>
+                      </div>
+                    )}
+
+                    {/* Run Results */}
+                    {runResults && (
+                      <div>
+                        <h3 className="text-sm font-bold text-blue-400 mb-3">
+                          ▶ RUN — {runResults.passedCount}/{runResults.totalCount} passed
+                        </h3>
+                        {runResults.results.map((r, i) => (
+                          <div key={i} className={`rounded-lg p-3 mb-2 text-xs md:text-sm font-mono ${
+                            r.passed ? 'bg-green-900/30 border border-green-800 text-green-400'
+                                     : 'bg-red-900/30 border border-red-800 text-red-400'}`}>
+                            <p>{r.passed ? '✅' : '❌'} Case {i + 1}: {r.input}</p>
+                            {!r.passed && <p className="text-xs mt-1">Expected: {r.expected} | Got: {r.actual}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Submit Results */}
+                    {submitResults && (
+                      <div>
+                        <h3 className={`text-sm font-bold mb-3 ${submitResults.allPassed ? 'text-green-400' : 'text-red-400'}`}>
+                          🚀 SUBMIT — {submitResults.allPassed ? 'ALL PASSED! 🏆' : `${submitResults.passedCount}/${submitResults.totalCount}`}
+                        </h3>
+
+                        {submitResults.exampleResults.map((r, i) => (
+                          <div key={`ex-${i}`} className={`rounded-lg p-2 mb-2 text-xs font-mono ${
+                            r.passed ? 'bg-green-900/30 border border-green-800 text-green-400'
+                                     : 'bg-red-900/30 border border-red-800 text-red-400'}`}>
+                            <p>{r.passed ? '✅' : '❌'} Example {i + 1}</p>
+                          </div>
+                        ))}
+
+                        <div className={`rounded-lg p-3 mb-2 text-sm font-mono ${
+                          submitResults.hiddenPassed === submitResults.hiddenTotal
+                            ? 'bg-green-900/30 border border-green-800 text-green-400'
+                            : 'bg-yellow-900/30 border border-yellow-800 text-yellow-400'}`}>
+                          <p>🔒 Hidden: {submitResults.hiddenPassed}/{submitResults.hiddenTotal}</p>
+                        </div>
+
+                        {submitResults.firstFailures.map((r, i) => (
+                          <div key={`fail-${i}`} className="rounded-lg p-2 mb-2 text-xs font-mono bg-red-900/30 border border-red-800 text-red-400">
+                            <p>❌ {r.input}</p>
+                            <p className="text-xs mt-1">Expected: {r.expected} | Got: {r.actual}</p>
+                          </div>
+                        ))}
+
+                        {!submitResults.allPassed && (
+                          <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }}
+                            className="mt-3 p-3 bg-red-900/50 border border-red-700 rounded-lg text-center">
+                            <p className="text-red-400 font-bold text-lg">💔 -1 Heart!</p>
+                            <p className="text-red-300 text-sm">{submitResults.heartsLeft} remaining</p>
+                          </motion.div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Right Panel - Editor */}
+        {/* Right Panel - Editor */}
+        <div className="flex-1 flex flex-col min-w-0">
           <AnimatePresence>
             {reverseTyping && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="bg-purple-900 text-purple-200 text-center py-2 text-sm font-bold"
-              >
+              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                className="bg-purple-900 text-purple-200 text-center py-2 text-sm font-bold flex-shrink-0">
                 🔀 DYSLEXIA ACTIVE — Your keys are scrambled!
               </motion.div>
             )}
           </AnimatePresence>
 
-          <Editor
-            height="calc(100vh - 120px)"
-            defaultLanguage="javascript"
-            theme={editorTheme}
-            value={code}
-            onChange={(value) => setCode(value || '')}
-            onMount={handleEditorDidMount}
-            options={{
-              fontSize: editorFontSize,
-              minimap: { enabled: false },
-              scrollBeyondLastLine: false,
-              padding: { top: 16 },
-              lineNumbers: 'on',
-              wordWrap: 'on',
-              tabSize: 2,
-              automaticLayout: true,
-            }}
-          />
+          {/* Editor fills remaining space */}
+          <div className="flex-1 min-h-0">
+            <Editor
+              height="100%"
+              defaultLanguage="javascript"
+              theme={editorTheme}
+              value={code}
+              onChange={(v) => setCode(v || '')}
+              onMount={handleEditorDidMount}
+              options={{
+                fontSize: editorFontSize, minimap: { enabled: false },
+                scrollBeyondLastLine: false, padding: { top: 16 },
+                lineNumbers: 'on', wordWrap: 'on', tabSize: 2, automaticLayout: true,
+              }}
+            />
+          </div>
 
-          {/* Bottom Bar */}
-          <div className="flex items-center justify-between px-6 py-3 bg-gray-900 border-t border-gray-800">
-            <div className="flex items-center gap-2">
-              <span className="text-gray-500 text-xs mr-2">⚡ POWERUPS:</span>
-              {powerups.length === 0 && (
-                <span className="text-gray-600 text-xs italic">Pass tests to earn powerups!</span>
-              )}
+          {/* Bottom Bar - Always visible */}
+          <div className="flex items-center justify-between px-3 md:px-6 py-2 md:py-3 bg-gray-900 border-t border-gray-800 flex-shrink-0">
+            {/* Powerups - scrollable, fixed max width */}
+            <div className="flex items-center gap-1 md:gap-2 overflow-x-auto max-w-[40%] flex-shrink-0">
+              <span className="text-gray-500 text-xs mr-1 hidden md:inline flex-shrink-0">⚡</span>
+              {powerups.length === 0 && <span className="text-gray-600 text-xs italic hidden md:inline whitespace-nowrap">Click ❓ to earn!</span>}
               {powerups.map((p) => (
-                <motion.button
-                  key={p.id}
-                  initial={{ scale: 0, rotate: -180 }}
-                  animate={{ scale: 1, rotate: 0 }}
-                  whileHover={{ scale: 1.2 }}
-                  whileTap={{ scale: 0.8 }}
+                <motion.button key={p.id}
+                  initial={{ scale: 0, rotate: -180 }} animate={{ scale: 1, rotate: 0 }}
+                  whileHover={{ scale: 1.2 }} whileTap={{ scale: 0.8 }}
                   onClick={() => handleUsePowerup(p.id, p.type)}
-                  className="w-12 h-12 rounded-lg bg-purple-900 border-2 border-purple-500 
-                             flex flex-col items-center justify-center cursor-pointer
-                             hover:bg-purple-800 transition-colors"
-                  title={`Use ${POWERUP_NAMES[p.type]} on opponent`}
-                >
-                  <span className="text-lg">{POWERUP_EMOJIS[p.type]}</span>
-                  <span className="text-[8px] text-purple-300">{POWERUP_NAMES[p.type]?.split(' ')[0]}</span>
+                  className="w-10 h-10 md:w-12 md:h-12 rounded-lg bg-purple-900 border-2 border-purple-500 flex flex-col items-center justify-center cursor-pointer hover:bg-purple-800 flex-shrink-0"
+                  title={`Use ${POWERUP_NAMES[p.type]} on opponent`}>
+                  <span className="text-base md:text-lg">{POWERUP_EMOJIS[p.type]}</span>
+                  <span className="text-[7px] md:text-[8px] text-purple-300">{POWERUP_NAMES[p.type]?.split(' ')[0]}</span>
                 </motion.button>
               ))}
             </div>
 
-            <div className="flex items-center gap-3">
-              <span className="text-gray-600 text-xs">Ctrl+Enter</span>
-              <button
-                onClick={doSubmit}
-                disabled={isRunning || !gameStarted}
-                className={`px-8 py-3 rounded-xl font-bold text-lg transition-all cursor-pointer
-                  ${isRunning || !gameStarted
+            {/* Action Buttons - always visible */}
+            <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
+              <div className="text-gray-600 text-[10px] md:text-xs text-right leading-tight hidden lg:block">
+                <p>Ctrl+Enter = Run</p>
+                <p>Ctrl+Shift+Enter = Submit</p>
+              </div>
+
+              <button onClick={doRun} disabled={isRunning || isSubmitting || !gameStarted}
+                className={`px-3 md:px-6 py-2 md:py-3 rounded-xl font-bold text-xs md:text-md transition-all cursor-pointer whitespace-nowrap ${
+                  isRunning || isSubmitting || !gameStarted
                     ? 'bg-gray-700 text-gray-500'
-                    : 'bg-green-500 text-black hover:bg-green-400 hover:scale-105 active:scale-95'
-                  }`}
-              >
-                {isRunning ? '⏳ Running...' : '▶ Run Tests'}
+                    : 'bg-blue-500 text-white hover:bg-blue-400 hover:scale-105 active:scale-95'}`}>
+                {isRunning ? '⏳...' : '▶ Run'}
+              </button>
+
+              <button onClick={doSubmit} disabled={isSubmitting || isRunning || !gameStarted || hearts <= 0}
+                className={`px-3 md:px-6 py-2 md:py-3 rounded-xl font-bold text-xs md:text-md transition-all cursor-pointer whitespace-nowrap ${
+                  isSubmitting || isRunning || !gameStarted || hearts <= 0
+                    ? 'bg-gray-700 text-gray-500'
+                    : 'bg-green-500 text-black hover:bg-green-400 hover:scale-105 active:scale-95'}`}>
+                {isSubmitting ? '⏳...' : `🚀 Submit (${hearts}❤️)`}
               </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Countdown Overlay */}
+      {/* Countdown */}
       <AnimatePresence>
         {!gameStarted && (
-          <motion.div
-            initial={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-black/90 flex items-center justify-center z-50"
-          >
+          <motion.div initial={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-black/90 flex items-center justify-center z-50">
             <div className="text-center">
-              <p className="text-gray-400 text-xl mb-4">
-                {opponent?.username || '???'} vs {username}
-              </p>
+              <p className="text-gray-400 text-xl mb-4">{opponent?.username || '???'} vs {username}</p>
               <p className="text-yellow-400 text-lg mb-8">{problem.title}</p>
-              <motion.p
-                key={countdown}
-                initial={{ scale: 3, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0, opacity: 0 }}
-                transition={{ duration: 0.4 }}
-                className="text-9xl font-black text-yellow-400"
-              >
+              <motion.p key={countdown}
+                initial={{ scale: 3, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0, opacity: 0 }} transition={{ duration: 0.4 }}
+                className="text-9xl font-black text-yellow-400">
                 {countdown > 0 ? countdown : 'GO!'}
               </motion.p>
             </div>
@@ -455,42 +536,26 @@ function Arena() {
         )}
       </AnimatePresence>
 
-      {/* Game Over Overlay */}
+      {/* Game Over */}
       <AnimatePresence>
         {gameOver && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="absolute inset-0 bg-black/80 flex items-center justify-center z-50"
-          >
-            <motion.div
-              initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            className="absolute inset-0 bg-black/80 flex items-center justify-center z-50">
+            <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
               transition={{ type: 'spring', damping: 15 }}
-              className="bg-gray-900 rounded-2xl p-12 text-center border-2 border-yellow-400"
-            >
-              <motion.p
-                initial={{ rotateY: 0 }}
-                animate={{ rotateY: 360 }}
-                transition={{ duration: 1 }}
-                className="text-7xl mb-4"
-              >
-                {winner === username ? '🏆' : '💀'}
-              </motion.p>
-              <h2 className="text-4xl font-black mb-2">
-                {winner === username ? 'YOU WIN!' : 'YOU LOSE!'}
-              </h2>
-              <p className="text-gray-400 text-xl mb-1">
-                {winner} finished first!
+              className="bg-gray-900 rounded-2xl p-8 md:p-12 text-center border-2 border-yellow-400 mx-4">
+              <motion.p initial={{ rotateY: 0 }} animate={{ rotateY: 360 }} transition={{ duration: 1 }}
+                className="text-5xl md:text-7xl mb-4">{winner === username ? '🏆' : '💀'}</motion.p>
+              <h2 className="text-2xl md:text-4xl font-black mb-2">{winner === username ? 'YOU WIN!' : 'YOU LOSE!'}</h2>
+              <p className="text-gray-400 text-lg md:text-xl mb-1">
+                {winReason === 'opponent_eliminated' && winner === username && '💔 Opponent ran out of hearts!'}
+                {winReason === 'opponent_eliminated' && winner !== username && '💔 You ran out of hearts!'}
+                {winReason === 'solved' && `${winner} solved it!`}
+                {winReason === 'opponent_disconnected' && 'Opponent disconnected'}
               </p>
-              <p className="text-gray-500 text-sm">
-                Time: {formatTime(timer)}
-              </p>
-              <button
-                onClick={() => window.location.href = '/'}
-                className="mt-6 px-8 py-3 bg-yellow-400 text-black rounded-xl font-bold text-lg cursor-pointer
-                           hover:bg-yellow-300 transition-all"
-              >
+              <p className="text-gray-500 text-sm">Time: {formatTime(timer)}</p>
+              <button onClick={() => window.location.href = '/'}
+                className="mt-6 px-8 py-3 bg-yellow-400 text-black rounded-xl font-bold text-lg cursor-pointer hover:bg-yellow-300 transition-all">
                 Play Again
               </button>
             </motion.div>
