@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Avatar from './Avatar';
 
-function VSScreen({ player1, player2, problemTitle, onComplete }) {
+function VSScreen({ p1Data, p2Data, problemTitle, onComplete }) {
   const [phase, setPhase] = useState('enter'); // 'enter' | 'clash' | 'problem' | 'done'
 
   useEffect(() => {
@@ -77,11 +78,8 @@ function VSScreen({ player1, player2, problemTitle, onComplete }) {
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 transition={{ delay: 0.3, type: 'spring', damping: 10 }}
-                className="w-24 h-24 md:w-32 md:h-32 rounded-full bg-gradient-to-br from-green-400 to-green-600 
-                           flex items-center justify-center text-4xl md:text-5xl font-black text-white
-                           border-4 border-green-300 shadow-lg shadow-green-500/30"
               >
-                {player1?.charAt(0)?.toUpperCase() || '?'}
+                <Avatar username={p1Data?.username} borderId={p1Data?.equipped_border} size="lg" />
               </motion.div>
 
               <motion.p
@@ -90,7 +88,7 @@ function VSScreen({ player1, player2, problemTitle, onComplete }) {
                 transition={{ delay: 0.5 }}
                 className="mt-4 text-xl md:text-3xl font-black text-green-400"
               >
-                {player1}
+                {p1Data?.username}
               </motion.p>
 
               <motion.div
@@ -132,15 +130,12 @@ function VSScreen({ player1, player2, problemTitle, onComplete }) {
               transition={{ duration: 0.6, ease: 'easeOut' }}
               className="flex-1 flex flex-col items-center"
             >
-              <motion.div
+                            <motion.div
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 transition={{ delay: 0.3, type: 'spring', damping: 10 }}
-                className="w-24 h-24 md:w-32 md:h-32 rounded-full bg-gradient-to-br from-red-400 to-red-600 
-                           flex items-center justify-center text-4xl md:text-5xl font-black text-white
-                           border-4 border-red-300 shadow-lg shadow-red-500/30"
               >
-                {player2?.charAt(0)?.toUpperCase() || '?'}
+                <Avatar username={p2Data?.username} borderId={p2Data?.equipped_border} size="lg" />
               </motion.div>
 
               <motion.p
@@ -149,7 +144,7 @@ function VSScreen({ player1, player2, problemTitle, onComplete }) {
                 transition={{ delay: 0.5 }}
                 className="mt-4 text-xl md:text-3xl font-black text-red-400"
               >
-                {player2}
+                {p2Data?.username || '???'}
               </motion.p>
 
               <motion.div

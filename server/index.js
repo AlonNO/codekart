@@ -140,6 +140,15 @@ if (item.type === 'theme') {
       }).eq('id', user.id);
     }
 
+    // ADD THIS BLOCK:
+    if (item.type === 'border') {
+      const borderId = item.meta?.borderId || 'default';
+      await supabase.from('profiles').update({
+        equipped_border: borderId,
+        updated_at: new Date().toISOString()
+      }).eq('id', user.id);
+    }
+
     return res.json({ ok: true });
   } catch (e) {
     console.error(e);
@@ -652,6 +661,7 @@ io.on('connection', (socket) => {
   socket.on('join_queue', (data) => {
     const username = data.username || `Player_${socket.id.slice(0, 4)}`;
     const loadout = data.loadout || ['blur', 'shake', 'reverse_typing'];
+    const equipped_border = data.equipped_border || 'default';
     // 1. Session Management
     const existingSession = activeSessions.get(username);
     
@@ -666,7 +676,7 @@ io.on('connection', (socket) => {
       console.log(`🔄 ${username} replaced old queue session`);
     }
 
-      const player = { id: socket.id, username, loadout };
+      const player = { id: socket.id, username, loadout, equipped_border };
 
     
     // Prevent physical duplicate socket objects in queue
@@ -729,8 +739,8 @@ io.on('connection', (socket) => {
       io.to(roomId).emit('game_start', {
         roomId,
         players: [
-          { id: player2.id, username: player2.username },
-          { id: player1.id, username: player1.username }
+          { id: player2.id, username: player2.username, equipped_border: player2.equipped_border },
+          { id: player1.id, username: player1.username, equipped_border: player1.equipped_border }
         ],
         problem: {
           id: problem.id, title: problem.title, description: problem.description,

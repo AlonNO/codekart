@@ -772,8 +772,12 @@ if (!problem || !roomId || !username) {
 
       {/* VS Screen */}
       {showVS && (
-        <VSScreen player1={username} player2={opponent?.username || '???'}
-          problemTitle={problem.title} onComplete={() => setShowVS(false)} />
+        <VSScreen 
+          p1Data={{ username, equipped_border: profile?.equipped_border }} 
+          p2Data={opponent}
+          problemTitle={problem.title} 
+          onComplete={() => setShowVS(false)} 
+        />
       )}
 <TypingFXOverlay ref={fxRef} />
       {/* Countdown */}

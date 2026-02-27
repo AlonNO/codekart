@@ -9,8 +9,9 @@ const SERVER_URL = import.meta.env.PROD ? 'https://codekart-server.onrender.com'
 function Lobby() {
   const location = useLocation();
   const navigate = useNavigate();
-  const username = location.state?.username || 'Anonymous';
-const loadout = location.state?.loadout || ['blur', 'shake', 'reverse_typing'];
+    const username = location.state?.username || 'Anonymous';
+  const loadout = location.state?.loadout || ['blur', 'shake', 'reverse_typing'];
+  const equipped_border = location.state?.equipped_border || 'default'; // ADD THIS
 
   const [status, setStatus] = useState('connecting');
   const [queuePosition, setQueuePosition] = useState(null);
@@ -32,7 +33,7 @@ const loadout = location.state?.loadout || ['blur', 'shake', 'reverse_typing'];
     newSocket.on('connect', () => {
       console.log('🔌 Connected as:', newSocket.id);
       setStatus('waiting');
-      newSocket.emit('join_queue', { username, loadout });
+          newSocket.emit('join_queue', { username, loadout, equipped_border }); // ADD THIS
     });
 
     newSocket.on('queue_joined', (data) => {

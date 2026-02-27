@@ -67,3 +67,55 @@ body {
   border-radius: 2px;
   padding: 0 2px;
 }
+/* ===== PROFILE BORDERS ===== */
+.avatar-border-default { border: 4px solid #4b5563; } /* gray-600 */
+
+.avatar-border-fire {
+  border: 4px solid #ef4444;
+  box-shadow: 0 0 15px #ef4444, inset 0 0 15px #ef4444;
+  animation: pulse-fire 1.5s infinite alternate;
+}
+@keyframes pulse-fire { 0% { box-shadow: 0 0 10px #ef4444; } 100% { box-shadow: 0 0 25px #f97316, inset 0 0 10px #f97316; } }
+
+.avatar-border-ice {
+  border: 4px solid #06b6d4;
+  box-shadow: 0 0 15px #06b6d4, inset 0 0 15px #06b6d4;
+  animation: pulse-ice 2s infinite alternate;
+}
+@keyframes pulse-ice { 0% { box-shadow: 0 0 10px #06b6d4; } 100% { box-shadow: 0 0 25px #22d3ee, inset 0 0 10px #22d3ee; } }
+
+.avatar-border-gold {
+  border: 4px solid #fbbf24;
+  box-shadow: 0 0 10px #fbbf24, inset 0 0 10px #fbbf24;
+  animation: shine-gold 3s linear infinite;
+}
+@keyframes shine-gold { 0% { border-color: #fbbf24; } 50% { border-color: #fef08a; box-shadow: 0 0 30px #fef08a; } 100% { border-color: #fbbf24; } }
+
+.avatar-border-rainbow {
+  border: 4px solid transparent;
+  background-clip: padding-box, border-box;
+  background-origin: padding-box, border-box;
+  background-image: linear-gradient(#1f2937, #1f2937), linear-gradient(var(--angle, 0deg), #ff0000, #ff7f00, #ffff00, #00ff00, #0000ff, #4b0082, #8b00ff);
+  animation: spin-rainbow 4s linear infinite;
+}
+@property --angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+@keyframes spin-rainbow { to { --angle: 360deg; } }
+
+.avatar-border-glitch {
+  border: 4px solid #fff;
+  animation: glitch-anim 0.5s infinite;
+}
+@keyframes glitch-anim {
+  0% { box-shadow: 4px 0 0 #0ff, -4px 0 0 #f0f; }
+  25% { box-shadow: -4px 0 0 #0ff, 4px 0 0 #f0f; }
+  50% { box-shadow: 4px 0 0 #f0f, -4px 0 0 #0ff; }
+  75% { box-shadow: -4px 0 0 #f0f, 4px 0 0 #0ff; }
+  100% { box-shadow: 4px 0 0 #0ff, -4px 0 0 #f0f; }
+}
+
+.avatar-border-shadow {
+  border: 4px solid #111;
+  box-shadow: 0 0 30px #000, inset 0 0 20px #000;
+  animation: breathe-shadow 4s infinite alternate;
+}
+@keyframes breathe-shadow { 0% { box-shadow: 0 0 20px #000; } 100% { box-shadow: 0 0 50px #000, inset 0 0 30px #000; } }

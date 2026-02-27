@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import LoadoutEditor from '../components/LoadoutEditor';
+import Avatar from '../components/Avatar';
 
 function Home() {
   const [guestUsername, setGuestUsername] = useState('');
@@ -32,7 +33,8 @@ const handlePlay = () => {
         username: name,
         userId: user?.id || null,
         isGuest: !user,
-        loadout
+        loadout,
+        equipped_border: profile?.equipped_border || 'default' // ADD THIS
       }
     });
   };
@@ -176,10 +178,8 @@ const handlePlay = () => {
         {user && profile ? (
           /* Logged In Player Card */
           <div className="bg-gray-800/80 rounded-2xl p-6 border border-gray-700 w-80 text-center backdrop-blur-sm">
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-yellow-400 to-orange-500
-                            flex items-center justify-center text-2xl font-black text-white mx-auto mb-3
-                            border-2 border-yellow-300">
-              {profile.username.charAt(0).toUpperCase()}
+            <div className="flex justify-center mb-3">
+              <Avatar username={profile.username} borderId={profile.equipped_border} size="md" />
             </div>
             <p className="text-xl font-bold text-white">{profile.username}</p>
             <p className={`text-sm font-bold ${getRankTitle(profile.elo).color}`}>

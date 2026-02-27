@@ -69,6 +69,7 @@ function Shop() {
 function isEquipped(item) {
   if (item.type === 'theme') return (item.meta?.themeKey || item.meta?.themeId) === equippedTheme;
   if (item.type === 'particles') return item.meta?.particleId === equippedParticles;
+  if (item.type === 'border') return item.meta?.borderId === (profile?.equipped_border || 'default');
   return false;
 }
 
@@ -147,6 +148,14 @@ function isEquipped(item) {
         >
           ✨ Particles
         </button>
+        <button
+          onClick={() => setTab('border')}
+          className={`flex-1 py-2 rounded-lg font-bold transition-colors ${
+            tab === 'border' ? 'bg-yellow-400 text-black' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+          }`}
+        >
+          🖼️ Borders
+        </button>
       </div>
 
       {error && (
@@ -180,9 +189,9 @@ function isEquipped(item) {
                     <div>
                       <p className="text-white font-black text-lg">{item.name}</p>
                       <p className="text-gray-500 text-xs mt-1">
-                        {item.type === 'theme'
-                          ? `Monaco theme: ${item.meta?.themeKey || item.meta?.themeId}`
-                          : `Effect: ${item.meta?.particleId}`}
+                        {item.type === 'theme' && `Monaco theme: ${item.meta?.themeKey || item.meta?.themeId}`}
+                        {item.type === 'particles' && `Effect: ${item.meta?.particleId}`}
+                        {item.type === 'border' && `Avatar Border: ${item.meta?.borderId}`}
                       </p>
                     </div>
 
