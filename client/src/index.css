@@ -35,3 +35,35 @@ body {
   transform: scaleX(-1);
   transition: transform 0.3s ease;
 }
+
+/* ===== NEW SABOTAGE EFFECTS ===== */
+
+/* Vim Curse - green tinted terminal look */
+.sabotage-vim .monaco-editor {
+  filter: sepia(0.4) hue-rotate(80deg) saturate(1.5);
+  transition: filter 0.3s ease;
+}
+
+/* Censor Bar - handled via JS decorations, but add pulsing border */
+.sabotage-censor .monaco-editor {
+  border: 2px solid rgba(255, 0, 0, 0.5);
+  animation: censor-pulse 0.5s infinite alternate;
+}
+
+@keyframes censor-pulse {
+  from { border-color: rgba(255, 0, 0, 0.3); }
+  to { border-color: rgba(255, 0, 0, 0.7); }
+}
+
+/* Ghost Typist - spooky green glow */
+.sabotage-ghost .monaco-editor {
+  box-shadow: inset 0 0 30px rgba(0, 255, 100, 0.1);
+}
+
+/* Censor decorations */
+.censor-decoration {
+  background-color: #000 !important;
+  color: #000 !important;
+  border-radius: 2px;
+  padding: 0 2px;
+}

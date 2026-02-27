@@ -3,7 +3,13 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const vm = require('vm');
+const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
+
+const supabaseUrl = process.env.SUPABASE_URL || 'https://jacgotvppetopxcrldgb.supabase.co';
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY || '';
+const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+
 
 const app = express();
 const server = http.createServer(app);
@@ -29,8 +35,10 @@ const HIDDEN_TEST_COUNT = 20;
 const MAX_HEARTS = 3;
 const ITEM_BOX_COOLDOWN = 15000; // 15 seconds minimum between claims
 
-const POWERUP_TYPES = ['blur', 'shake', 'light_theme', 'reverse_typing', 'tiny_font'];
-
+const POWERUP_TYPES = [
+  'blur', 'shake', 'light_theme', 'reverse_typing', 'tiny_font',
+  'vim_curse', 'censor_bar', 'ghost_typist'
+];
 function getRandomPowerup() {
   return POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
 }
@@ -401,6 +409,136 @@ const playerRooms = new Map();
 // ============================================
 // SOCKET.IO CONNECTION
 // ============================================
+// ============================================
+// ELO & MATCH RECORDING
+// ============================================
+function calculateElo(winnerElo, loserElo) {
+  const K = 32;
+  const expectedWinner = 1 / (1 + Math.pow(10, (loserElo - winnerElo) / 400));
+  const expectedLoser = 1 / (1 + Math.pow(10, (winnerElo - loserElo) / 400));
+  const winnerChange = Math.round(K * (1 - expectedWinner));
+  const loserChange = Math.round(K * (0 - expectedLoser));
+  return { winnerChange, loserChange };
+}
+
+async function recordMatch(roomId, room, winnerPlayer, problem) {
+  if (!supabase) return;
+
+  const loserPlayer = room.players.find(p => p.username !== winnerPlayer.username);
+  if (!loserPlayer) return;
+
+  try {
+    const { data: winnerProfile } = await supabase
+      .from('profiles').select('*').eq('username', winnerPlayer.username).maybeSingle();
+    const { data: loserProfile } = await supabase
+      .from('profiles').select('*').eq('username', loserPlayer.username).maybeSingle();
+
+    const winnerElo = winnerProfile?.elo || 1000;
+    const loserElo = loserProfile?.elo || 1000;
+    const { winnerChange, loserChange } = calculateElo(winnerElo, loserElo);
+    const duration = Math.round((Date.now() - room.startTime) / 1000);
+
+    // Update winner if they have an account
+    if (winnerProfile) {
+      await supabase.from('profiles').update({
+        elo: winnerProfile.elo + winnerChange,
+        wins: winnerProfile.wins + 1,
+        games_played: winnerProfile.games_played + 1,
+        kart_coins: winnerProfile.kart_coins + 50,
+        updated_at: new Date().toISOString()
+      }).eq('id', winnerProfile.id);
+      console.log(`📊 ${winnerPlayer.username}: +${winnerChange} ELO, +50 coins`);
+    }
+
+    // Update loser if they have an account
+    if (loserProfile) {
+      await supabase.from('profiles').update({
+        elo: Math.max(0, loserProfile.elo + loserChange),
+        losses: loserProfile.losses + 1,
+        games_played: loserProfile.games_played + 1,
+        kart_coins: loserProfile.kart_coins + 10,
+        updated_at: new Date().toISOString()
+      }).eq('id', loserProfile.id);
+      console.log(`📊 ${loserPlayer.username}: ${loserChange} ELO, +10 coins`);
+    }
+
+    // Record match if at least one player has an account
+    if (winnerProfile || loserProfile) {
+      await supabase.from('matches').insert({
+        room_id: roomId,
+        winner_id: winnerProfile?.id || null,
+        loser_id: loserProfile?.id || null,
+        winner_username: winnerPlayer.username,
+        loser_username: loserPlayer.username,
+        problem_id: room.problemId,
+        problem_title: problem.title,
+        win_reason: 'solved',
+        duration_seconds: duration,
+        winner_elo_change: winnerProfile ? winnerChange : 0,
+        loser_elo_change: loserProfile ? loserChange : 0
+      });
+    }
+  } catch (err) {
+    console.error('Failed to record match:', err.message);
+  }
+}
+
+async function recordMatchElimination(roomId, room, winnerPlayer, loserPlayer, problem) {
+  if (!supabase) return;
+
+  try {
+    const { data: winnerProfile } = await supabase
+      .from('profiles').select('*').eq('username', winnerPlayer.username).maybeSingle();
+    const { data: loserProfile } = await supabase
+      .from('profiles').select('*').eq('username', loserPlayer.username).maybeSingle();
+
+    const winnerElo = winnerProfile?.elo || 1000;
+    const loserElo = loserProfile?.elo || 1000;
+    const { winnerChange, loserChange } = calculateElo(winnerElo, loserElo);
+    const reducedWinnerChange = Math.round(winnerChange * 0.6);
+    const duration = Math.round((Date.now() - room.startTime) / 1000);
+
+    if (winnerProfile) {
+      await supabase.from('profiles').update({
+        elo: winnerProfile.elo + reducedWinnerChange,
+        wins: winnerProfile.wins + 1,
+        games_played: winnerProfile.games_played + 1,
+        kart_coins: winnerProfile.kart_coins + 30,
+        updated_at: new Date().toISOString()
+      }).eq('id', winnerProfile.id);
+      console.log(`📊 ${winnerPlayer.username}: +${reducedWinnerChange} ELO (elim), +30 coins`);
+    }
+
+    if (loserProfile) {
+      await supabase.from('profiles').update({
+        elo: Math.max(0, loserProfile.elo + loserChange),
+        losses: loserProfile.losses + 1,
+        games_played: loserProfile.games_played + 1,
+        kart_coins: loserProfile.kart_coins + 5,
+        updated_at: new Date().toISOString()
+      }).eq('id', loserProfile.id);
+      console.log(`📊 ${loserPlayer.username}: ${loserChange} ELO (elim), +5 coins`);
+    }
+
+    if (winnerProfile || loserProfile) {
+      await supabase.from('matches').insert({
+        room_id: roomId,
+        winner_id: winnerProfile?.id || null,
+        loser_id: loserProfile?.id || null,
+        winner_username: winnerPlayer.username,
+        loser_username: loserPlayer.username,
+        problem_id: room.problemId,
+        problem_title: problem.title,
+        win_reason: 'opponent_eliminated',
+        duration_seconds: duration,
+        winner_elo_change: winnerProfile ? reducedWinnerChange : 0,
+        loser_elo_change: loserProfile ? loserChange : 0
+      });
+    }
+  } catch (err) {
+    console.error('Failed to record match:', err.message);
+  }
+}
 io.on('connection', (socket) => {
   console.log(`⚡ Player connected: ${socket.id}`);
 
@@ -548,6 +686,8 @@ io.on('connection', (socket) => {
       room.gameEnded = true;
       io.to(roomId).emit('game_over', { winner: username, reason: 'solved' });
       console.log(`🏆 ${username} WINS (cheat code)!`);
+      // Record match in database
+      recordMatch(roomId, room, player, problem);
       return;
     }
 
@@ -605,6 +745,9 @@ io.on('connection', (socket) => {
         reason: 'opponent_eliminated'
       });
       console.log(`💀 ${username} ELIMINATED! ${opponent?.username} wins!`);
+            // Record match in database
+        const winnerPlayer = room.players.find(p => p.id !== socket.id);
+        recordMatchElimination(roomId, room, winnerPlayer, player, problem);
     }
   });
 

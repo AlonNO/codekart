@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { motion } from 'framer-motion';
+import { playMatchFound } from '../utils/sounds';
 
 const SERVER_URL = import.meta.env.PROD ? 'https://codekart-server.onrender.com' : 'http://localhost:3001';
 
@@ -16,7 +17,6 @@ function Lobby() {
   const [matchData, setMatchData] = useState(null);
   const socketRef = useRef(null);
 
-  // Animated dots
   useEffect(() => {
     const interval = setInterval(() => {
       setDots(prev => prev.length >= 3 ? '' : prev + '.');
@@ -41,6 +41,7 @@ function Lobby() {
     newSocket.on('game_start', (data) => {
       setStatus('matched');
       setMatchData(data);
+      playMatchFound();
 
       setTimeout(() => {
         navigate('/arena', {
@@ -69,7 +70,7 @@ function Lobby() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen gap-8">
-      <motion.h2 
+      <motion.h2
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         className="text-5xl font-bold"
@@ -79,7 +80,7 @@ function Lobby() {
         <span className="ml-2">🏎️</span>
       </motion.h2>
 
-      <motion.div 
+      <motion.div
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ delay: 0.2 }}
@@ -122,12 +123,12 @@ function Lobby() {
         )}
 
         {status === 'matched' && (
-          <motion.div 
+          <motion.div
             initial={{ scale: 0.5 }}
             animate={{ scale: 1 }}
             className="flex flex-col items-center gap-4"
           >
-            <motion.p 
+            <motion.p
               animate={{ scale: [1, 1.2, 1] }}
               transition={{ duration: 0.5, repeat: Infinity }}
               className="text-5xl"

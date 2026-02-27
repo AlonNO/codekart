@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { playItemBoxSpawn } from '../utils/sounds';
 
 function ItemBox({ onClaim, gameStarted, gameOver }) {
   const [box, setBox] = useState(null);
@@ -26,6 +27,7 @@ function ItemBox({ onClaim, gameStarted, gameOver }) {
       };
 
       setBox(newBox);
+      playItemBoxSpawn();
 
       // Auto-despawn after 6 seconds if not clicked
       despawnRef.current = setTimeout(() => {
