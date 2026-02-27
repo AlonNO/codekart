@@ -4,7 +4,7 @@ import Editor from '@monaco-editor/react';
 import { io } from 'socket.io-client';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const SERVER_URL = 'http://localhost:3001';
+const SERVER_URL = import.meta.env.PROD ? 'https://codekart-server.onrender.com' : 'http://localhost:3001';
 
 const POWERUP_EMOJIS = {
   blur: '🌫️',

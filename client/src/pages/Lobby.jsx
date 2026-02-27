@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { motion } from 'framer-motion';
 
-const SERVER_URL = 'http://localhost:3001';
+const SERVER_URL = import.meta.env.PROD ? 'https://codekart-server.onrender.com' : 'http://localhost:3001';
 
 function Lobby() {
   const location = useLocation();
